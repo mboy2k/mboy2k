@@ -9,3 +9,7 @@ if ! command -v hermes >/dev/null 2>&1; then
     | bash -s -- --skip-setup --skip-browser --skip-computer-use
 fi
 echo "Hermes: $(hermes --version | head -1)"
+# Keep the bot self-starting after a sandbox restore, preview or not.
+if ! pgrep -f "watchdog-hermes.sh" >/dev/null 2>&1; then
+  setsid nohup bash /tmp/hoplite/workspace/watchdog-hermes.sh >> "$HERMES_HOME/watchdog.log" 2>&1 &
+fi
