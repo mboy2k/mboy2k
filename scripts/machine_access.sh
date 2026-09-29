@@ -8,10 +8,23 @@ set -u
 QUIET=0
 [ "${1:-}" = "--quiet" ] && QUIET=1
 
+# .env in the workspace carries project credentials (BROWSER_API_KEY, TS_AUTHKEY…);
+# it is gitignored, so the key survives sandbox rebuilds without touching git.
+WORKSPACE="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "$WORKSPACE/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$WORKSPACE/.env"
+  set +a
+fi
+
 TS_BIN=/usr/local/bin/tailscale
 TSD_BIN=/usr/local/bin/tailscaled
 TS_SOCKET=/var/run/tailscale/tailscaled.sock
-TS_STATE=/var/lib/tailscale/tailscaled.state
+# Keep the node identity inside the workspace so the machine stays the same node
+# (and stays logged in) when the sandbox is rebuilt around it.
+TS_STATE="${TS_STATE:-$WORKSPACE/.hoplite/tailscale/tailscaled.state}"
+LEGACY_TS_STATE=/var/lib/tailscale/tailscaled.state
 STATE_DIR=/var/lib/hoplite-pc
 # The sandbox runs with no_new_privs, so sudo can never escalate for a normal
 # user; logging in as root is the only way to get full control of the machine.
@@ -21,6 +34,13 @@ PC_HOSTNAME="${PC_HOSTNAME:-hoplite-pc}"
 log() { [ "$QUIET" = 1 ] || printf 'machine-access: %s\n' "$*"; }
 
 mkdir -p "$STATE_DIR" /var/lib/tailscale /var/run/tailscale /run/sshd
+mkdir -p "$(dirname "$TS_STATE")"
+
+# Carry over an identity created before the state moved into the workspace.
+if [ ! -s "$TS_STATE" ] && [ -s "$LEGACY_TS_STATE" ]; then
+  cp "$LEGACY_TS_STATE" "$TS_STATE"
+  log "da chuyen state tailscale vao workspace"
+fi
 
 install_tailscale() {
   [ -x "$TS_BIN" ] && [ -x "$TSD_BIN" ] && return 0
@@ -96,8 +116,9 @@ ensure_tailscaled() {
     return 0
   fi
   [ -x "$TSD_BIN" ] || return 1
+  # Only inbound forwarding is wanted; the optional socks5/HTTP proxy listeners
+  # just add extra open ports the preview tries to expose.
   nohup "$TSD_BIN" --tun=userspace-networking --socket="$TS_SOCKET" --state="$TS_STATE" \
-    --socks5-server=localhost:1055 --outbound-http-proxy-listen=localhost:1055 \
     >>/var/log/tailscaled.log 2>&1 &
   for _ in $(seq 1 40); do
     [ -S "$TS_SOCKET" ] && { log "da bat tailscaled"; return 0; }
@@ -115,14 +136,14 @@ ensure_tailnet() {
     if "$TS_BIN" --socket="$TS_SOCKET" up --authkey="$key" --hostname="$PC_HOSTNAME" \
         --accept-dns=false >/dev/null 2>&1; then
       log "da vao tailnet voi ten $PC_HOSTNAME"
-    else
-      log "chua vao duoc tailnet (kiem tra lai auth key)"
+      return 0
     fi
-    return 0
+    # A bad or expired key must not block the interactive route below.
+    log "auth key khong dung duoc, chuyen sang dang nhap thu cong"
   fi
 
-  # No auth key: keep an interactive login waiting so the desktop app can show
-  # a fresh URL. Only start a new flow when none is pending.
+  # Keep an interactive login waiting so the desktop app can show a fresh URL.
+  # Only start a new flow when none is pending.
   local state authurl
   state=$("$TS_BIN" --socket="$TS_SOCKET" status --json 2>/dev/null \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("BackendState",""), d.get("AuthURL",""))' 2>/dev/null)

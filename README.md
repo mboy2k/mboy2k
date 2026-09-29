@@ -52,10 +52,13 @@ lệnh trong máy.
   dùng được cho user thường; vào thẳng root là cách duy nhất có toàn quyền.
 - **Tailscale chạy chế độ userspace** (không cần TUN): kết nối TCP vào port N của node được chuyển về
   `localhost:N`, nên SSH chỉ mở trong mạng riêng của chủ máy, không phơi ra internet.
+- **Danh tính node nằm trong workspace** (`.hoplite/tailscale/tailscaled.state`, đã gitignore): sandbox
+  dựng lại vẫn là **đúng máy đó** trên mạng riêng, không phải đăng nhập lại.
 - Mật khẩu SSH sinh mỗi lần sandbox dựng lại, lưu ở `/var/lib/hoplite-pc/ssh-password` và hiện trong
   app **🔐 Kết nối từ xa**.
-- `TS_AUTHKEY` (auth key reusable) ⇒ máy **tự vào mạng riêng** sau mỗi lần dựng lại. Không có key thì
-  app Kết nối từ xa hiện link đăng nhập, bấm một lần là xong.
+- `TS_AUTHKEY` (**auth key reusable**, dạng `tskey-auth-…`) ⇒ máy tự vào mạng riêng, không cần bấm gì.
+  Key sai/hết hạn thì script tự rơi về luồng đăng nhập thủ công, không chặn preview.
+- Không có key cũng được: app Kết nối từ xa hiện link đăng nhập, bấm **một lần** là xong và giữ luôn.
 - Thêm chìa khoá riêng để khỏi dùng mật khẩu: `BOSS_SSH_PUBKEY="ssh-ed25519 …"` hoặc ghi vào
   `/var/lib/hoplite-pc/authorized_keys`.
 - Tuỳ biến: `PC_HOSTNAME` (mặc định `hoplite-pc`), `PC_SSH_USER` (mặc định `root`).
