@@ -470,6 +470,16 @@ def create_app() -> FastAPI:
             "docs": "/docs",
             "actions": ["open", "snapshot", "screenshot", "click", "type", "press", "eval", "wait", "close"],
             "mcp": "/mcp" if mcp_app is not None else None,
+            "features": {
+                "persistent_profiles": "keep login state across sessions/restarts via 'profile' in /open",
+                "per_session_proxy": "http(s)/socks5 proxy per session, one Chromium per proxy",
+                "session_options": "user_agent, viewport, locale, timezone, geolocation, color_scheme, is_mobile",
+                "resource_blocking": "block_resources: images/media/font/stylesheet for speed and less RAM",
+                "snapshot_formats": "format=text|markdown in /snapshot",
+                "cookies": "GET/POST /cookies to read or set cookies of a session",
+                "screenshots": "PNG, full_page supported",
+                "openapi": "/openapi.json, docs UI at /docs, agent guide in repo AGENTS.md",
+            },
         }
 
     @app.get("/health")

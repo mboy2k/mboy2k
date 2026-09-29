@@ -157,6 +157,17 @@ b.close()
 
 ## Cho agent khác dùng kiểu gì?
 
+### Cách agent tự khám phá tính năng
+
+Không cần chép tay tài liệu vào prompt — agent tự tra được:
+
+1. `GET /` — trả danh sách actions + mô tả ngắn từng tính năng (nguồn chân lý theo code)
+2. `GET /openapi.json` — schema máy đọc đầy đủ mọi endpoint (agent HTTP hiểu bản chất)
+3. `GET {BASE}/mcp` — agent MCP thấy ngay 11 tool `browser_*` kèm mô tả
+4. **AGENTS.md** ở thư mục gốc repo — bản hướng dẫn dành riêng cho agent (Hermes và
+   hầu hết agent đọc tự động file này khi vào repo); cũng có thể dán nội dung file vào
+   system prompt nếu agent không có cơ chế đọc file
+
 **1. REST/OpenAPI** — mọi agent có tool HTTP (curl, fetch, code interpreter) dùng được ngay.
 Spec OpenAPI machine-readable tại `/openapi.json`, UI thử tại `/docs`.
 
