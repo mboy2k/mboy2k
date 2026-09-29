@@ -390,5 +390,6 @@ if modal is not None:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(create_app(), host="0.0.0.0", port=int(os.environ.get("PORT", "8099")))
+    uvicorn.run(create_app(), host=os.environ.get("HOST", "0.0.0.0"),
+                port=int(os.environ.get("PORT", "8099")))
 

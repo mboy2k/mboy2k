@@ -39,6 +39,27 @@ modal deploy cloud_browser/app.py
 **VPS thường** — `pip install -r requirements.txt && playwright install --with-deps chromium`,
 rồi chạy `python cloud_browser/app.py` dưới systemd/tmux (cổng mặc định 8099, đổi qua `PORT`).
 
+### Chạy 24/7 trên VPS với systemd (khuyên dùng khi agent cùng máy)
+
+```bash
+sudo git clone https://github.com/mboy2k/mboy2k /opt/cloud-browser
+cd /opt/cloud-browser
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+sudo .venv/bin/playwright install --with-deps chromium
+
+# sinh key mới riêng cho VPS
+printf 'BROWSER_API_KEY=%s\nHOST=127.0.0.1\nPORT=8099\n' "$(openssl rand -hex 24)" > .env
+
+sudo cp deploy/cloud-browser.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cloud-browser
+curl -s localhost:8099/health        # kiểm tra
+```
+
+`HOST=127.0.0.1` giữ service chỉ nghe trong máy — an toàn nhất khi Hermes chạy cùng VPS.
+Xem log: `journalctl -u cloud-browser -f`.
+
 ## API
 
 | Endpoint | Body (JSON) | Trả về |
