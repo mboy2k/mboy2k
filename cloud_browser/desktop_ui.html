@@ -652,7 +652,9 @@ function buildAccess(w) {
     '<div class="acc-card" id="a-login" style="display:none">' +
     '<div class="acc-label">Bước 1 — nối máy vào mạng riêng</div>' +
     '<p class="acc-note">Máy chưa vào mạng Tailscale. Bấm nút dưới, đăng nhập bằng tài khoản Tailscale của Sếp, xong quay lại bấm "Làm mới".</p>' +
-    '<button class="primary" id="a-login-btn">Mở trang đăng nhập Tailscale</button></div>' +
+    '<button class="primary" id="a-login-btn">Mở trang đăng nhập Tailscale</button>' +
+    '<div class="acc-line"><span>link</span><code id="a-login-url">—</code><button id="a-copy-login">Copy link</button></div>' +
+    '<p class="acc-note">Nút trên bị chặn khi Preview chạy trong khung? Copy link rồi dán sang tab mới là được.</p></div>' +
     '<div class="acc-card"><div class="acc-label">Bước 2 — SSH từ thiết bị của Sếp</div>' +
     '<div class="acc-line"><code id="a-cmd">—</code><button id="a-copy-cmd">Copy lệnh</button></div>' +
     '<div class="acc-line"><span>user</span><code id="a-user">root</code>' +
@@ -683,6 +685,7 @@ function buildAccess(w) {
          : (t.error || "Tailscale chưa sẵn sàng, bấm Làm mới sau ít giây."));
     loginBox.style.display = (!connected && t.auth_url) ? "" : "none";
     loginBtn.onclick = () => t.auth_url && window.open(t.auth_url, "_blank", "noopener");
+    w.body.querySelector("#a-login-url").textContent = t.auth_url || "—";
     cmdLine.textContent = d.ssh && d.ssh.command ? d.ssh.command : "chờ máy vào mạng riêng";
     w.body.querySelector("#a-user").textContent = (d.ssh && d.ssh.user) || "root";
     pwLine.textContent = info.showPw ? ((d.ssh && d.ssh.password) || "—") : "••••••••";
@@ -713,6 +716,8 @@ function buildAccess(w) {
   w.body.querySelector("#a-copy-cmd").addEventListener("click", (e) => copy(cmdLine.textContent, e.target));
   w.body.querySelector("#a-copy-pw").addEventListener("click", (e) =>
     copy(info.data && info.data.ssh && info.data.ssh.password, e.target));
+  w.body.querySelector("#a-copy-login").addEventListener("click", (e) =>
+    copy(info.data && info.data.tailscale && info.data.tailscale.auth_url, e.target));
 
   load();
   const timer = setInterval(() => {
@@ -733,6 +738,8 @@ function buildAgent(w) {
     '<button id="g-show">Hiện</button><button id="g-copy-key">Copy</button></div></div>' +
     '<div class="acc-card"><div class="acc-label">MCP — dán vào Claude Code / Cursor / Codex</div>' +
     '<pre class="g-code" id="g-mcp"></pre><button class="primary" id="g-copy-mcp">Copy config MCP</button></div>' +
+    '<div class="acc-card"><div class="acc-label">CLI — agent chỉ cần chạy được lệnh shell (không cần MCP)</div>' +
+    '<pre class="g-code" id="g-cli"></pre><button class="primary" id="g-copy-cli">Copy lệnh CLI</button></div>' +
     '<div class="acc-card"><div class="acc-label">REST — cho agent chỉ có tool HTTP</div>' +
     '<pre class="g-code" id="g-curl"></pre><button class="primary" id="g-copy-curl">Copy lệnh thử</button></div>' +
     '<p class="acc-note" id="g-tools"></p>' +
@@ -752,6 +759,15 @@ function buildAgent(w) {
     "  -H \"X-API-Key: $KEY\" -H 'Content-Type: application/json' \\\n" +
     "  -d '{\"cmd\":\"uname -a && ls -la\"}'";
 
+  const cliSnippet = (base, key) =>
+    "export MACHINE_URL=" + base + "\n" +
+    "export BROWSER_API_KEY=" + key + "\n\n" +
+    "scripts/machine_cli.sh info\n" +
+    "scripts/machine_cli.sh run \"uname -a && ls -la\"\n" +
+    "scripts/machine_cli.sh read /etc/hostname\n" +
+    "scripts/machine_cli.sh ls /tmp\n" +
+    "echo \"noi dung\" | scripts/machine_cli.sh write /tmp/ghi-chu.txt";
+
   const paint = (kit) => {
     info.kit = kit;
     const base = (kit.tailnet && kit.tailnet.base_url) || window.location.origin;
@@ -765,7 +781,9 @@ function buildAgent(w) {
     q("#g-key").textContent = info.showKey ? key : (kit.api_key ? "••••••••••••" : key);
     info.mcp = mcpConfig(base, kit.api_key || "");
     info.curl = curlSnippet(base, kit.api_key || "");
+    info.cli = cliSnippet(base, kit.api_key || "");
     q("#g-mcp").textContent = info.mcp;
+    q("#g-cli").textContent = info.cli;
     q("#g-curl").textContent = info.curl;
     q("#g-tools").textContent = "Tool agent dùng được: " + kit.tools.join(", ") +
       " — chạy lệnh, đọc/ghi file, xem máy, mở web và chụp màn hình.";
@@ -795,6 +813,7 @@ function buildAgent(w) {
   q("#g-refresh").addEventListener("click", load);
   q("#g-copy-key").addEventListener("click", (e) => copy(info.kit && info.kit.api_key, e.target));
   q("#g-copy-mcp").addEventListener("click", (e) => copy(info.mcp, e.target));
+  q("#g-copy-cli").addEventListener("click", (e) => copy(info.cli, e.target));
   q("#g-copy-curl").addEventListener("click", (e) => copy(info.curl, e.target));
   q("#g-show").addEventListener("click", () => {
     info.showKey = !info.showKey;
