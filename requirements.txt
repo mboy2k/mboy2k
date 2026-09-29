@@ -1,0 +1,10 @@
+# For local standalone mode and the client:
+playwright==1.63.0
+fastapi>=0.115
+uvicorn[standard]
+httpx
+# MCP server so agent frameworks can plug in natively (v2 renamed FastMCP):
+mcp>=1.2,<2
+# For 24/7 deployment on Modal:
+# modal
+

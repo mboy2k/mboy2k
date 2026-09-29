@@ -1,0 +1,17 @@
+[Unit]
+Description=Cloud Browser API (Playwright + FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Edit User= to the account that owns /opt/cloud-browser
+User=cloudbrowser
+WorkingDirectory=/opt/cloud-browser
+EnvironmentFile=/opt/cloud-browser/.env
+ExecStart=/opt/cloud-browser/.venv/bin/python cloud_browser/app.py
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
