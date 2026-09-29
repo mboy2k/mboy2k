@@ -1,0 +1,844 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0f1e">
+<link rel="icon" href="data:,">
+<title>Hoplite PC — Máy tính của Sếp</title>
+<style>
+  :root{
+    --bg:#0a0f1e; --card:rgba(18,25,47,.95); --line:rgba(255,255,255,.13);
+    --text:#eef2ff; --muted:#9aa4c7; --accent:#5b8cff; --accent2:#22d3a6; --danger:#ff6b81;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    color:var(--text); overflow:hidden; -webkit-tap-highlight-color:transparent;
+    background:radial-gradient(1200px 800px at 15% 8%, #1b2a55 0%, var(--bg) 58%) fixed;
+  }
+  button{font:inherit;color:inherit;cursor:pointer}
+
+  #wall{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+        gap:20px;padding:24px 16px 92px;text-align:center;overflow:auto}
+  #wall h1{margin:0;font-size:25px}
+  #wall p{margin:6px 0 0;color:var(--muted);font-size:13.5px;max-width:540px}
+  .tiles{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+  .tile{width:114px;padding:16px 8px;border-radius:18px;border:1px solid var(--line);
+        background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.02));
+        display:flex;flex-direction:column;align-items:center;gap:8px}
+  .tile:active{transform:scale(.97)}
+  .tile .ic{font-size:30px;line-height:1}
+  .tile .nm{font-size:12.5px;color:var(--muted)}
+  #sysline{color:var(--muted);font-size:12.5px;max-width:660px;min-height:18px}
+
+  #bar{position:fixed;left:0;right:0;bottom:0;height:56px;display:flex;align-items:center;gap:8px;
+       padding:0 10px calc(env(safe-area-inset-bottom,0px));background:rgba(9,13,26,.88);
+       border-top:1px solid var(--line);backdrop-filter:blur(12px);z-index:50}
+  #bar .brand{font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap}
+  #bar-apps{display:flex;gap:6px;overflow-x:auto;flex:1;padding:4px 0}
+  .bar-btn{border:1px solid transparent;background:rgba(255,255,255,.06);border-radius:10px;
+           padding:7px 10px;font-size:13px;white-space:nowrap}
+  .bar-btn.active{border-color:var(--accent);background:rgba(91,140,255,.2)}
+  #bar-right{display:flex;align-items:center;gap:8px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--accent2)}
+  #clock{font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted);white-space:nowrap}
+
+  #wins{position:absolute;inset:0;pointer-events:none}
+  .win{position:absolute;pointer-events:auto;display:flex;flex-direction:column;min-width:290px;min-height:200px;
+       background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;
+       box-shadow:0 24px 60px rgba(0,0,0,.5);z-index:10}
+  .win.hidden{display:none}
+  .win.max{left:0!important;top:0!important;width:100%!important;height:calc(100% - 56px)!important;border-radius:0}
+  .win-head{display:flex;align-items:center;gap:9px;padding:9px 11px;background:rgba(255,255,255,.05);
+            border-bottom:1px solid var(--line);touch-action:none;user-select:none;cursor:grab}
+  .win-head .ttl{flex:1;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .win-head button{width:30px;height:27px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.07);line-height:1}
+  .win-head button.close{color:var(--danger)}
+  .win-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+  .busy .win-head .ttl::after{content:" · đang xử lý…";color:var(--muted);font-weight:400}
+
+  /* calculator */
+  .calc{flex:1;display:flex;flex-direction:column;padding:12px;gap:8px;min-height:0}
+  .calc-expr{color:var(--muted);font-size:13px;text-align:right;min-height:18px;white-space:nowrap;overflow:hidden}
+  .calc-out{font-size:38px;font-weight:300;text-align:right;white-space:nowrap;overflow-x:auto;padding:2px 2px 8px}
+  .calc-pad{flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;min-height:220px}
+  .calc-pad button{border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.07);font-size:19px}
+  .calc-pad button.fn{background:rgba(255,255,255,.16)}
+  .calc-pad button.op{background:rgba(91,140,255,.35)}
+  .calc-pad button.eq{background:var(--accent)}
+  .calc-pad button.wide{grid-column:span 2}
+  .calc-pad button:active{filter:brightness(1.4)}
+  .calc-hint{color:var(--muted);font-size:11.5px;margin:0;text-align:center}
+
+  /* terminal */
+  .term{flex:1;display:flex;flex-direction:column;min-height:0}
+  .term-out{flex:1;overflow:auto;padding:12px;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+            white-space:pre-wrap;word-break:break-word}
+  .t-line.cmd{color:var(--accent2)}
+  .t-line.err{color:var(--danger)}
+  .t-line.meta{color:var(--muted)}
+  .term-chips{display:flex;gap:6px;overflow-x:auto;padding:6px 10px;border-top:1px solid var(--line)}
+  .term-chips button{border:1px solid var(--line);background:rgba(255,255,255,.05);border-radius:999px;
+                     padding:4px 10px;font-size:12px;white-space:nowrap;color:var(--muted)}
+  .term-form{display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--line)}
+  .term-form .ps1{color:var(--accent2);font-family:ui-monospace,monospace}
+  .term-form input{flex:1;min-width:0;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:9px;
+                   padding:9px 10px;color:var(--text);font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+  .term-form button{border:1px solid var(--line);background:var(--accent);border-radius:9px;padding:9px 12px}
+  .term-meta{padding:4px 10px 8px;color:var(--muted);font-size:11.5px}
+
+  /* browser */
+  .br{flex:1;display:flex;flex-direction:column;min-height:0}
+  .br-bar{display:flex;gap:6px;padding:9px 10px;border-bottom:1px solid var(--line)}
+  .br-bar input{flex:1;min-width:0;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:9px;
+                padding:9px 10px;color:var(--text)}
+  .br-bar button{border:1px solid var(--line);background:var(--accent);border-radius:9px;padding:9px 12px}
+  .br-tools{display:flex;gap:6px;overflow-x:auto;padding:7px 10px;border-bottom:1px solid var(--line)}
+  .br-tools button{border:1px solid var(--line);background:rgba(255,255,255,.06);border-radius:9px;
+                   padding:6px 9px;font-size:13px;white-space:nowrap}
+  .br-tools button.on{border-color:var(--accent);background:rgba(91,140,255,.2)}
+  .br-view{flex:1;overflow:auto;background:#0c1224;display:flex;align-items:flex-start;justify-content:center;padding:8px}
+  .br-view img{width:100%;height:auto;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:crosshair}
+  .br-view img.native{width:auto;max-width:none}
+  .br-start{padding:14px;display:flex;flex-direction:column;gap:12px;align-items:center;color:var(--muted);font-size:13px}
+  .br-start .tiles .tile{width:104px}
+  .br-status{padding:6px 10px;border-top:1px solid var(--line);color:var(--muted);font-size:11.5px;
+             white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* remote access */
+  .acc{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+  .acc-head{display:flex;align-items:center;gap:10px}
+  .acc-head .badge{padding:4px 10px;border-radius:999px;font-size:12px;border:1px solid var(--line)}
+  .acc-head .badge.ok{background:rgba(34,211,166,.18);border-color:var(--accent2)}
+  .acc-head .badge.warn{background:rgba(255,107,129,.16);border-color:var(--danger)}
+  .acc-head button{margin-left:auto;border:1px solid var(--line);background:rgba(255,255,255,.07);
+                   border-radius:9px;padding:6px 10px;font-size:12.5px}
+  .acc-card{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,.04);
+            display:flex;flex-direction:column;gap:8px}
+  .acc-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .acc-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}
+  .acc-line code{background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12.5px}
+  .acc-line span{color:var(--muted);font-size:12.5px}
+  .acc-line button{border:1px solid var(--line);background:rgba(255,255,255,.07);border-radius:8px;padding:5px 9px;font-size:12.5px}
+  .acc-note{color:var(--muted);font-size:12.5px;margin:0}
+  .acc button.primary{border:1px solid var(--line);background:var(--accent);border-radius:9px;padding:9px 12px}
+  .g-code{background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0;
+          font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
+
+  @media (max-width:760px){
+    .win{left:0!important;top:0!important;width:100%!important;height:calc(100% - 56px)!important;border-radius:0}
+    .win-head{cursor:default}
+    #wall h1{font-size:22px}
+  }
+</style>
+</head>
+<body>
+
+<div id="wall">
+  <div>
+    <h1>🖥️ Hoplite PC</h1>
+    <p>Máy tính chạy trong workspace Hoplite: tính toán, gõ lệnh vào máy, và lướt web bằng trình duyệt của máy. Mở bằng Preview nên chỉ tài khoản của Sếp vào được.</p>
+  </div>
+  <div class="tiles" id="tiles"></div>
+  <div id="sysline">Đang lấy thông tin máy…</div>
+</div>
+
+<div id="wins"></div>
+
+<div id="bar">
+  <span class="brand">🖥️ Hoplite PC</span>
+  <div id="bar-apps"></div>
+  <div id="bar-right"><span class="dot" title="Máy đang chạy"></span><span id="clock">--:--:--</span></div>
+</div>
+
+<script>
+"use strict";
+
+const APPS = {
+  calc:    {title:"Máy tính",   icon:"🧮", size:[340, 470], build:buildCalc},
+  term:    {title:"Terminal",   icon:"⌨️", size:[660, 430], build:buildTerm},
+  access:  {title:"Kết nối từ xa", icon:"🔐", size:[560, 470], build:buildAccess},
+  agent:   {title:"Cho agent",  icon:"🤖", size:[640, 560], build:buildAgent},
+  browser: {title:"Trình duyệt",icon:"🌐", size:[960, 620], build:buildBrowser},
+};
+const QUICK_LINKS = [
+  ["Google", "https://www.google.com"], ["YouTube", "https://www.youtube.com"],
+  ["Wikipedia", "https://vi.wikipedia.org"], ["VnExpress", "https://vnexpress.net"],
+  ["Tin nhanh", "https://news.google.com"], ["Bản đồ", "https://www.google.com/maps"],
+  ["Vị trí của máy", "https://ipinfo.io"], ["Thời tiết Hà Nội", "https://www.google.com/search?q=thoi+tiet+ha+noi"],
+];
+
+const WINS = new Map();
+let zTop = 10;
+let activeApp = null;
+let sysInfo = null;
+
+const $ = (id) => document.getElementById(id);
+
+async function api(path, body) {
+  const opts = body === undefined ? {} :
+    {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)};
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    let detail = res.status + " " + res.statusText;
+    try { const j = await res.json(); if (j && j.detail) detail = j.detail; } catch (_) {}
+    const err = new Error(detail); err.status = res.status; throw err;
+  }
+  return res.json();
+}
+
+/* ---------- window manager ---------- */
+
+function openApp(id) {
+  let w = WINS.get(id);
+  if (!w) {
+    const app = APPS[id];
+    const el = document.createElement("section");
+    el.className = "win";
+    el.dataset.app = id;
+    el.innerHTML = '<div class="win-head"><span>' + app.icon + '</span><span class="ttl">' + app.title +
+      '</span><button class="min" title="Thu nhỏ">—</button><button class="close" title="Đóng">✕</button></div>' +
+      '<div class="win-body"></div>';
+    $("wins").appendChild(el);
+    w = {el, body: el.querySelector(".win-body")};
+    WINS.set(id, w);
+    w.el.querySelector(".min").addEventListener("click", (e) => { e.stopPropagation(); setMinimized(id, true); });
+    w.el.querySelector(".close").addEventListener("click", (e) => { e.stopPropagation(); closeApp(id); });
+    w.el.addEventListener("pointerdown", () => focusApp(id), true);
+    makeDraggable(w, id);
+    placeWindow(w, id);
+    app.build(w);
+  }
+  setMinimized(id, false);
+  focusApp(id);
+}
+
+function placeWindow(w, id) {
+  const [width, height] = APPS[id].size;
+  const narrow = window.innerWidth <= 760;
+  if (narrow) { w.el.classList.add("max"); return; }
+  const step = WINS.size - 1;
+  w.el.style.width = width + "px";
+  w.el.style.height = height + "px";
+  w.el.style.left = Math.max(12, Math.min(60 + step * 26, window.innerWidth - width - 12)) + "px";
+  w.el.style.top = Math.max(12, Math.min(46 + step * 24, window.innerHeight - height - 70)) + "px";
+}
+
+function makeDraggable(w, id) {
+  const head = w.el.querySelector(".win-head");
+  let dx = 0, dy = 0, dragging = false;
+  head.addEventListener("pointerdown", (e) => {
+    if (w.el.classList.contains("max") || e.target.closest("button")) return;
+    dragging = true; dx = e.clientX; dy = e.clientY;
+    head.setPointerCapture(e.pointerId);
+  });
+  head.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const left = w.el.offsetLeft + (e.clientX - dx);
+    const top = w.el.offsetTop + (e.clientY - dy);
+    dx = e.clientX; dy = e.clientY;
+    w.el.style.left = Math.min(Math.max(left, -40), window.innerWidth - 80) + "px";
+    w.el.style.top = Math.min(Math.max(top, 0), window.innerHeight - 100) + "px";
+  });
+  const stop = () => { dragging = false; };
+  head.addEventListener("pointerup", stop);
+  head.addEventListener("pointercancel", stop);
+}
+
+function focusApp(id) {
+  const w = WINS.get(id);
+  if (!w) return;
+  activeApp = id;
+  w.el.style.zIndex = ++zTop;
+  renderBar();
+}
+
+function setMinimized(id, minimized) {
+  const w = WINS.get(id);
+  if (!w) return;
+  w.el.classList.toggle("hidden", minimized);
+  renderBar();
+}
+
+function closeApp(id) {
+  const w = WINS.get(id);
+  if (!w) return;
+  w.el.remove();
+  WINS.delete(id);
+  if (activeApp === id) activeApp = null;
+  renderBar();
+}
+
+function setBusy(id, busy) {
+  const w = WINS.get(id);
+  if (w) w.el.classList.toggle("busy", !!busy);
+}
+
+function renderBar() {
+  const box = $("bar-apps");
+  box.textContent = "";
+  Object.entries(APPS).forEach(([id, app]) => {
+    const b = document.createElement("button");
+    b.className = "bar-btn" + (activeApp === id ? " active" : "");
+    b.textContent = app.icon + " " + app.title;
+    b.addEventListener("click", () => {
+      const w = WINS.get(id);
+      if (w && !w.el.classList.contains("hidden") && activeApp === id) setMinimized(id, true);
+      else openApp(id);
+    });
+    box.appendChild(b);
+  });
+}
+
+/* ---------- desktop chrome ---------- */
+
+function buildLauncher() {
+  const tiles = $("tiles");
+  Object.entries(APPS).forEach(([id, app]) => {
+    const b = document.createElement("button");
+    b.className = "tile";
+    b.innerHTML = '<span class="ic">' + app.icon + '</span><span class="nm">' + app.title + '</span>';
+    b.addEventListener("click", () => openApp(id));
+    tiles.appendChild(b);
+  });
+}
+
+function tick() {
+  $("clock").textContent = new Date().toLocaleTimeString("vi-VN",
+    {timeZone:"Asia/Ho_Chi_Minh", hour:"2-digit", minute:"2-digit", second:"2-digit"});
+}
+
+async function refreshState() {
+  try {
+    sysInfo = await api("/pc/state");
+    const geo = sysInfo.geo || {};
+    const ip = geo.ip ? geo.ip + (geo.city ? " · " + geo.city : "") + (geo.country ? ", " + geo.country : "")
+                      : "chưa lấy được IP";
+    $("sysline").textContent = sysInfo.host + " · " + sysInfo.kernel + " · CPU " + sysInfo.cpu_count +
+      " nhân · RAM " + sysInfo.mem_used_mb + "/" + sysInfo.mem_total_mb + " MB · IP " + ip;
+  } catch (err) {
+    $("sysline").textContent = "Không lấy được thông tin máy: " + err.message;
+  }
+}
+
+/* ---------- calculator ---------- */
+
+const CALC_OPS = {add:"+", sub:"−", mul:"×", div:"÷"};
+
+function buildCalc(w) {
+  const keys = ["AC|fn", "±|fn", "%|fn", "÷|op", "7", "8", "9", "×|op",
+                "4", "5", "6", "−|op", "1", "2", "3", "+|op", "0|wide", ".", "=|eq"];
+  w.body.innerHTML = '<div class="calc"><div class="calc-expr" id="c-expr">&nbsp;</div>' +
+    '<div class="calc-out" id="c-out">0</div><div class="calc-pad" id="c-pad"></div>' +
+    '<p class="calc-hint">Dùng được cả bàn phím máy tính · AC xoá hết</p></div>';
+  const pad = w.body.querySelector("#c-pad");
+  const state = {a:null, op:null, entry:"0", fresh:true, expr:""};
+  w.calc = state;
+  keys.forEach((spec) => {
+    const [key, cls] = spec.split("|");
+    const b = document.createElement("button");
+    b.textContent = key;
+    if (cls) b.className = cls;
+    b.addEventListener("click", () => calcPress(w, key));
+    pad.appendChild(b);
+  });
+  calcRender(w);
+}
+
+function calcValue(text) {
+  const n = parseFloat(text);
+  return isFinite(n) ? n : 0;
+}
+
+function calcApply(x, y, op) {
+  if (op === "+") return x + y;
+  if (op === "−") return x - y;
+  if (op === "×") return x * y;
+  return y === 0 ? NaN : x / y;
+}
+
+function calcFormat(n) {
+  if (!isFinite(n)) return "Không chia được cho 0";
+  const rounded = Math.round(n * 1e10) / 1e10;
+  return new Intl.NumberFormat("vi-VN", {maximumFractionDigits: 10}).format(rounded);
+}
+
+function calcShowEntry(text) {
+  const neg = text.startsWith("-");
+  const body = neg ? text.slice(1) : text;
+  const [intPart, fracPart] = body.split(".");
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return (neg ? "-" : "") + grouped + (body.includes(".") ? "," + (fracPart || "") : "");
+}
+
+function calcPress(w, key) {
+  const c = w.calc;
+  if (/^[0-9]$/.test(key)) {
+    c.entry = (c.fresh || c.entry === "0") ? key : c.entry + key;
+    c.fresh = false;
+  } else if (key === ".") {
+    if (c.fresh) { c.entry = "0."; c.fresh = false; }
+    else if (!c.entry.includes(".")) c.entry += ".";
+  } else if (key === "AC") {
+    c.a = null; c.op = null; c.entry = "0"; c.fresh = true; c.expr = "";
+  } else if (key === "±") {
+    c.entry = c.entry.startsWith("-") ? c.entry.slice(1) : "-" + c.entry;
+  } else if (key === "%") {
+    c.entry = String(calcValue(c.entry) / 100);
+    c.fresh = false;
+  } else if (key === "⌫") {
+    if (!c.fresh) c.entry = c.entry.length > 1 ? c.entry.slice(0, -1) : "0";
+    if (c.entry === "-") c.entry = "0";
+  } else if (["+", "−", "×", "÷"].includes(key)) {
+    const current = calcValue(c.entry);
+    if (c.op !== null && !c.fresh) { c.a = calcApply(c.a, current, c.op); c.entry = String(c.a); }
+    else if (c.a === null) c.a = current;
+    c.op = key; c.fresh = true;
+    c.expr = calcFormat(c.a) + " " + key;
+  } else if (key === "=") {
+    if (c.op !== null) {
+      const current = calcValue(c.entry);
+      const result = calcApply(c.a, current, c.op);
+      c.expr = calcFormat(c.a) + " " + c.op + " " + calcFormat(current) + " =";
+      c.a = null; c.op = null; c.entry = isFinite(result) ? String(result) : "0"; c.fresh = true;
+      calcRender(w);
+      if (!isFinite(result)) w.body.querySelector("#c-out").textContent = "Không chia được cho 0";
+      return;
+    }
+    c.expr = "";
+  }
+  calcRender(w);
+}
+
+function calcRender(w) {
+  const c = w.calc;
+  w.body.querySelector("#c-expr").innerHTML = c.expr || "&nbsp;";
+  w.body.querySelector("#c-out").textContent = calcShowEntry(c.entry);
+}
+
+document.addEventListener("keydown", (e) => {
+  if (activeApp !== "calc" || !WINS.has("calc")) return;
+  const map = {"Enter":"=", "=":"=", "Escape":"AC", "Backspace":"⌫", "+":"+", "-":"−",
+               "*":"×", "/":"÷", "%":"%", ",":".", ".":"."};
+  const key = /^[0-9]$/.test(e.key) ? e.key : map[e.key];
+  if (!key) return;
+  e.preventDefault();
+  calcPress(WINS.get("calc"), key);
+});
+
+/* ---------- terminal ---------- */
+
+const TERM_CHIPS = ["pwd", "ls -la", "uname -a", "df -h", "free -m", "curl -s ifconfig.me", "date"];
+
+function buildTerm(w) {
+  w.body.innerHTML = '<div class="term"><div class="term-out" id="t-out"></div>' +
+    '<div class="term-chips" id="t-chips"></div>' +
+    '<form class="term-form"><span class="ps1">$</span>' +
+    '<input id="t-in" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Nhập lệnh rồi Enter…">' +
+    '<button type="submit">Chạy</button></form><div class="term-meta" id="t-meta"></div></div>';
+  const out = w.body.querySelector("#t-out");
+  const input = w.body.querySelector("#t-in");
+  const meta = w.body.querySelector("#t-meta");
+  const history = [];
+  let histIndex = -1;
+  let running = false;
+
+  const line = (text, cls) => {
+    const d = document.createElement("div");
+    d.className = "t-line" + (cls ? " " + cls : "");
+    d.textContent = text;
+    out.appendChild(d);
+    out.scrollTop = out.scrollHeight;
+  };
+
+  const run = async (cmd) => {
+    if (running || !cmd.trim()) return;
+    running = true;
+    setBusy("term", true);
+    line("$ " + cmd, "cmd");
+    try {
+      const r = await api("/pc/term/run", {cmd});
+      if (r.stdout) line(r.stdout.replace(/\s+$/, ""));
+      if (r.code !== 0) line("[mã thoát " + r.code + "]", "err");
+      meta.textContent = "thư mục hiện tại: " + r.cwd;
+    } catch (err) {
+      line("Lỗi: " + err.message, "err");
+    } finally {
+      running = false;
+      setBusy("term", false);
+      input.focus();
+    }
+  };
+
+  TERM_CHIPS.forEach((c) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = c;
+    b.addEventListener("click", () => run(c));
+    w.body.querySelector("#t-chips").appendChild(b);
+  });
+
+  w.body.querySelector(".term-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const cmd = input.value;
+    input.value = "";
+    if (cmd.trim()) { history.push(cmd); histIndex = history.length; }
+    run(cmd);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowUp" && history.length) {
+      histIndex = Math.max(0, histIndex - 1);
+      input.value = history[histIndex] || "";
+    } else if (e.key === "ArrowDown") {
+      histIndex = Math.min(history.length, histIndex + 1);
+      input.value = history[histIndex] || "";
+    }
+  });
+  line("Hoplite PC — shell chạy ngay trong workspace (thư mục " + (sysInfo ? sysInfo.workspace : "/tmp/hoplite/workspace") + ").", "meta");
+  line("Gõ lệnh bên dưới, hoặc bấm nhanh một lệnh gợi ý.", "meta");
+  meta.textContent = sysInfo ? "thư mục hiện tại: " + sysInfo.cwd : "";
+}
+
+/* ---------- remote browser ---------- */
+
+function buildBrowser(w) {
+  w.body.innerHTML = '<div class="br">' +
+    '<div class="br-bar"><input id="b-url" autocomplete="off" autocapitalize="off" spellcheck="false"' +
+    ' placeholder="Nhập địa chỉ web hoặc từ khoá tìm kiếm…"><button id="b-go">Đi</button></div>' +
+    '<div class="br-tools"><button data-act="back" title="Quay lại">⬅</button>' +
+    '<button data-act="reload" title="Tải lại">⟳</button><button data-act="home" title="Trang chủ">🏠</button>' +
+    '<button data-act="type" title="Nhập chữ vào ô đang chọn">⌨️ Nhập</button>' +
+    '<button data-act="press" title="Nhấn Enter">⏎</button>' +
+    '<button data-act="up" title="Cuộn lên">▲</button><button data-act="down" title="Cuộn xuống">▼</button>' +
+    '<button data-act="zoom" id="b-zoom" title="Vừa khung / kích thước thật">Vừa khung</button>' +
+    '<button data-act="close" title="Đóng phiên trình duyệt">✖ Đóng tab</button></div>' +
+    '<div class="br-view" id="b-view"></div><div class="br-status" id="b-status">Chưa mở trang nào.</div></div>';
+  const view = w.body.querySelector("#b-view");
+  const urlBox = w.body.querySelector("#b-url");
+  const status = w.body.querySelector("#b-status");
+  const zoomBtn = w.body.querySelector("#b-zoom");
+  const img = document.createElement("img");
+  img.alt = "Màn hình trình duyệt trên máy";
+  img.style.display = "none";
+
+  const startPage = () => {
+    img.style.display = "none";
+    view.textContent = "";
+    const box = document.createElement("div");
+    box.className = "br-start";
+    const hint = document.createElement("div");
+    hint.textContent = "Chọn nhanh một trang, hoặc gõ địa chỉ ở trên:";
+    const tiles = document.createElement("div");
+    tiles.className = "tiles";
+    QUICK_LINKS.forEach(([name, href]) => {
+      const b = document.createElement("button");
+      b.className = "tile";
+      b.innerHTML = '<span class="ic">🔗</span><span class="nm">' + name + '</span>';
+      b.addEventListener("click", () => navigate(href, name));
+      tiles.appendChild(b);
+    });
+    box.append(hint, tiles);
+    view.appendChild(box);
+  };
+
+  const showShot = () => {
+    if (!w.sid) return;
+    view.textContent = "";
+    img.style.display = "";
+    view.appendChild(img);
+    img.src = "/pc/browser/shot?session_id=" + encodeURIComponent(w.sid) + "&t=" + Date.now();
+  };
+
+  const setStatus = (r) => {
+    status.textContent = (r && r.url ? r.url : "trang chủ") + (r && r.title ? " — " + r.title : "");
+    if (r && r.url) urlBox.value = r.url;
+  };
+
+  const ensureSession = async (url) => {
+    try {
+      const r = await api("/pc/browser/open", {url, session_id: w.sid});
+      w.sid = r.session_id;
+      setStatus(r);
+      return r;
+    } catch (err) {
+      if (err.status === 404 && w.sid) {  // phiên cũ đã hết hạn, mở phiên mới
+        w.sid = null;
+        const r = await api("/pc/browser/open", {url});
+        w.sid = r.session_id;
+        setStatus(r);
+        return r;
+      }
+      throw err;
+    }
+  };
+
+  const navigate = async (url, label) => {
+    setBusy("browser", true);
+    status.textContent = "Đang mở " + (label || url) + "…";
+    try {
+      await ensureSession(url);
+      showShot();
+    } catch (err) {
+      status.textContent = "Lỗi: " + err.message;
+    } finally {
+      setBusy("browser", false);
+    }
+  };
+
+  const act = async (kind, extra) => {
+    if (!w.sid) { startPage(); return; }
+    setBusy("browser", true);
+    try {
+      const r = await api("/pc/browser/action", Object.assign({session_id: w.sid, kind}, extra || {}));
+      setStatus(r);
+      showShot();
+    } catch (err) {
+      if (err.status === 404) { w.sid = null; startPage(); status.textContent = "Phiên đã hết hạn, Sếp mở lại trang nhé."; }
+      else status.textContent = "Lỗi: " + err.message;
+    } finally {
+      setBusy("browser", false);
+    }
+  };
+
+  img.addEventListener("click", (e) => {
+    const r = img.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    act("click", {fx:(e.clientX - r.left) / r.width, fy:(e.clientY - r.top) / r.height});
+  });
+
+  w.body.querySelector("#b-go").addEventListener("click", () => navigate(urlBox.value));
+  urlBox.addEventListener("keydown", (e) => { if (e.key === "Enter") navigate(urlBox.value); });
+  w.body.querySelector(".br-tools").addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    const act$ = btn.dataset.act;
+    if (act$ === "home") { startPage(); status.textContent = "Trang chủ — chọn nhanh hoặc gõ địa chỉ."; return; }
+    if (act$ === "up") { act("scroll", {dy:-600}); return; }
+    if (act$ === "down") { act("scroll", {dy:600}); return; }
+    if (act$ === "type") {
+      const text = window.prompt("Nội dung cần gõ vào ô đang chọn trên trang:");
+      if (text) act("key", {text, submit:true});
+      return;
+    }
+    if (act$ === "press") { act("press", {text:"Enter"}); return; }
+    if (act$ === "zoom") {
+      const native = img.classList.toggle("native");
+      zoomBtn.textContent = native ? "Vừa khung" : "Kích thước thật";
+      return;
+    }
+    if (act$ === "close") {
+      if (w.sid) api("/pc/browser/close", {session_id:w.sid}).catch(() => {});
+      w.sid = null;
+      startPage();
+      status.textContent = "Đã đóng phiên trình duyệt.";
+      return;
+    }
+    act(act$);
+  });
+
+  startPage();
+  status.textContent = "Chưa mở trang nào — chọn nhanh hoặc gõ địa chỉ.";
+}
+
+/* ---------- remote access ---------- */
+
+function buildAccess(w) {
+  w.body.innerHTML = '<div class="acc">' +
+    '<div class="acc-head"><span id="a-badge" class="badge">Đang kiểm tra…</span>' +
+    '<button id="a-refresh">⟳ Làm mới</button></div>' +
+    '<p class="acc-note" id="a-ts"></p>' +
+    '<div class="acc-card" id="a-login" style="display:none">' +
+    '<div class="acc-label">Bước 1 — nối máy vào mạng riêng</div>' +
+    '<p class="acc-note">Máy chưa vào mạng Tailscale. Bấm nút dưới, đăng nhập bằng tài khoản Tailscale của Sếp, xong quay lại bấm "Làm mới".</p>' +
+    '<button class="primary" id="a-login-btn">Mở trang đăng nhập Tailscale</button>' +
+    '<div class="acc-line"><span>link</span><code id="a-login-url">—</code><button id="a-copy-login">Copy link</button></div>' +
+    '<p class="acc-note">Nút trên bị chặn khi Preview chạy trong khung? Copy link rồi dán sang tab mới là được.</p></div>' +
+    '<div class="acc-card"><div class="acc-label">Bước 2 — SSH từ thiết bị của Sếp</div>' +
+    '<div class="acc-line"><code id="a-cmd">—</code><button id="a-copy-cmd">Copy lệnh</button></div>' +
+    '<div class="acc-line"><span>user</span><code id="a-user">root</code>' +
+    '<span>mật khẩu</span><code id="a-pw">••••••••</code>' +
+    '<button id="a-show">Hiện</button><button id="a-copy-pw">Copy</button></div></div>' +
+    '<p class="acc-note">Thiết bị cần cài Tailscale (miễn phí) và đăng nhập cùng tài khoản, sau đó chạy lệnh SSH ở trên — hoặc dùng app SSH trên điện thoại (Termius, Termux…) với cùng user/mật khẩu. ' +
+    'Đăng nhập là root nên toàn quyền (sandbox bật no_new_privs, sudo không dùng được). Có chìa khoá riêng thì khỏi cần mật khẩu. Mật khẩu đổi mỗi lần sandbox dựng lại.</p></div>';
+
+  const badge = w.body.querySelector("#a-badge");
+  const tsLine = w.body.querySelector("#a-ts");
+  const loginBox = w.body.querySelector("#a-login");
+  const loginBtn = w.body.querySelector("#a-login-btn");
+  const cmdLine = w.body.querySelector("#a-cmd");
+  const pwLine = w.body.querySelector("#a-pw");
+  const info = {data:null, showPw:false};
+
+  const paint = (d) => {
+    info.data = d;
+    const t = d.tailscale || {};
+    const connected = t.state === "Running";
+    badge.textContent = connected ? "Đã vào mạng riêng Tailscale"
+      : t.state === "NeedsLogin" ? "Cần đăng nhập Tailscale"
+      : t.installed ? "Chưa bật được Tailscale" : "Chưa cài Tailscale";
+    badge.className = "badge " + (connected ? "ok" : "warn");
+    tsLine.textContent = connected
+      ? "Tên máy trên mạng riêng: " + (t.dns_name || t.hostname || "hoplite-pc") + (t.ip ? " · IP nội bộ " + t.ip : "")
+      : (t.state === "NeedsLogin" ? "Máy đang chờ Sếp đăng nhập — chỉ cần làm một lần cho mỗi lần sandbox dựng lại."
+         : (t.error || "Tailscale chưa sẵn sàng, bấm Làm mới sau ít giây."));
+    loginBox.style.display = (!connected && t.auth_url) ? "" : "none";
+    loginBtn.onclick = () => t.auth_url && window.open(t.auth_url, "_blank", "noopener");
+    w.body.querySelector("#a-login-url").textContent = t.auth_url || "—";
+    cmdLine.textContent = d.ssh && d.ssh.command ? d.ssh.command : "chờ máy vào mạng riêng";
+    w.body.querySelector("#a-user").textContent = (d.ssh && d.ssh.user) || "root";
+    pwLine.textContent = info.showPw ? ((d.ssh && d.ssh.password) || "—") : "••••••••";
+  };
+
+  const load = async () => {
+    try {
+      paint(await api("/pc/access"));
+    } catch (err) {
+      badge.textContent = "Lỗi: " + err.message;
+      badge.className = "badge warn";
+    }
+  };
+
+  w.body.querySelector("#a-refresh").addEventListener("click", load);
+  w.body.querySelector("#a-show").addEventListener("click", () => {
+    info.showPw = !info.showPw;
+    w.body.querySelector("#a-show").textContent = info.showPw ? "Ẩn" : "Hiện";
+    if (info.data) paint(info.data);
+  });
+  const copy = (text, btn) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      const old = btn.textContent; btn.textContent = "Đã copy";
+      setTimeout(() => { btn.textContent = old; }, 1200);
+    }).catch(() => {});
+  };
+  w.body.querySelector("#a-copy-cmd").addEventListener("click", (e) => copy(cmdLine.textContent, e.target));
+  w.body.querySelector("#a-copy-pw").addEventListener("click", (e) =>
+    copy(info.data && info.data.ssh && info.data.ssh.password, e.target));
+  w.body.querySelector("#a-copy-login").addEventListener("click", (e) =>
+    copy(info.data && info.data.tailscale && info.data.tailscale.auth_url, e.target));
+
+  load();
+  const timer = setInterval(() => {
+    if (WINS.get("access") !== w) { clearInterval(timer); return; }
+    load();
+  }, 6000);
+}
+
+/* ---------- agent kit ---------- */
+
+function buildAgent(w) {
+  w.body.innerHTML = '<div class="acc">' +
+    '<div class="acc-head"><span id="g-badge" class="badge">Đang kiểm tra…</span>' +
+    '<button id="g-refresh">⟳ Làm mới</button></div>' +
+    '<p class="acc-note" id="g-base"></p>' +
+    '<div class="acc-card"><div class="acc-label">API key (MCP và REST dùng chung)</div>' +
+    '<div class="acc-line"><code id="g-key">••••••••••••</code>' +
+    '<button id="g-show">Hiện</button><button id="g-copy-key">Copy</button></div></div>' +
+    '<div class="acc-card"><div class="acc-label">MCP — dán vào Claude Code / Cursor / Codex</div>' +
+    '<pre class="g-code" id="g-mcp"></pre><button class="primary" id="g-copy-mcp">Copy config MCP</button></div>' +
+    '<div class="acc-card"><div class="acc-label">CLI — agent chỉ cần chạy được lệnh shell (không cần MCP)</div>' +
+    '<pre class="g-code" id="g-cli"></pre><button class="primary" id="g-copy-cli">Copy lệnh CLI</button></div>' +
+    '<div class="acc-card"><div class="acc-label">REST — cho agent chỉ có tool HTTP</div>' +
+    '<pre class="g-code" id="g-curl"></pre><button class="primary" id="g-copy-curl">Copy lệnh thử</button></div>' +
+    '<p class="acc-note" id="g-tools"></p>' +
+    '<p class="acc-note" id="g-ssh"></p></div>';
+
+  const info = {kit:null, showKey:false, mcp:"", curl:""};
+  const badge = w.body.querySelector("#g-badge");
+  const q = (id) => w.body.querySelector(id);
+
+  const mcpConfig = (base, key) => JSON.stringify({
+    mcpServers: {"hoplite-machine": {url: base + "/mcp", headers: {"X-API-Key": key}}}
+  }, null, 2);
+
+  const curlSnippet = (base, key) =>
+    "BASE=" + base + "\nKEY=" + key + "\n\n" +
+    "curl -s $BASE/machine/exec \\\n" +
+    "  -H \"X-API-Key: $KEY\" -H 'Content-Type: application/json' \\\n" +
+    "  -d '{\"cmd\":\"uname -a && ls -la\"}'";
+
+  const cliSnippet = (base, key) =>
+    "export MACHINE_URL=" + base + "\n" +
+    "export BROWSER_API_KEY=" + key + "\n\n" +
+    "scripts/machine_cli.sh info\n" +
+    "scripts/machine_cli.sh run \"uname -a && ls -la\"\n" +
+    "scripts/machine_cli.sh read /etc/hostname\n" +
+    "scripts/machine_cli.sh ls /tmp\n" +
+    "echo \"noi dung\" | scripts/machine_cli.sh write /tmp/ghi-chu.txt";
+
+  const paint = (kit) => {
+    info.kit = kit;
+    const base = (kit.tailnet && kit.tailnet.base_url) || window.location.origin;
+    const key = kit.api_key || "(chưa đặt key — không cần gửi)";
+    const tailnet = kit.tailnet && kit.tailnet.running;
+    badge.textContent = tailnet ? "Sẵn sàng cho agent qua Tailscale" : "Agent dùng được, nhưng nên bật Tailscale";
+    badge.className = "badge " + (tailnet ? "ok" : "warn");
+    q("#g-base").textContent = "Agent gọi máy qua: " + base +
+      (tailnet ? " (tên máy trong mạng riêng, sống qua mỗi lần dựng lại)"
+               : " (URL preview — bật Tailscale ở app 🔐 để có địa chỉ cố định)");
+    q("#g-key").textContent = info.showKey ? key : (kit.api_key ? "••••••••••••" : key);
+    info.mcp = mcpConfig(base, kit.api_key || "");
+    info.curl = curlSnippet(base, kit.api_key || "");
+    info.cli = cliSnippet(base, kit.api_key || "");
+    q("#g-mcp").textContent = info.mcp;
+    q("#g-cli").textContent = info.cli;
+    q("#g-curl").textContent = info.curl;
+    q("#g-tools").textContent = "Tool agent dùng được: " + kit.tools.join(", ") +
+      " — chạy lệnh, đọc/ghi file, xem máy, mở web và chụp màn hình.";
+    q("#g-ssh").textContent = kit.tailnet && kit.tailnet.ip
+      ? "Agent chạy shell thuần cũng vào được bằng SSH: ssh root@" + (kit.tailnet.dns_name || kit.tailnet.ip) +
+        " (mật khẩu ở app 🔐 Kết nối từ xa)."
+      : "Bật Tailscale ở app 🔐 Kết nối từ xa để agent cũng vào được bằng SSH.";
+  };
+
+  const load = async () => {
+    try {
+      paint(await api("/pc/agent"));
+    } catch (err) {
+      badge.textContent = "Lỗi: " + err.message;
+      badge.className = "badge warn";
+    }
+  };
+
+  const copy = (text, btn) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      const old = btn.textContent; btn.textContent = "Đã copy";
+      setTimeout(() => { btn.textContent = old; }, 1200);
+    }).catch(() => {});
+  };
+
+  q("#g-refresh").addEventListener("click", load);
+  q("#g-copy-key").addEventListener("click", (e) => copy(info.kit && info.kit.api_key, e.target));
+  q("#g-copy-mcp").addEventListener("click", (e) => copy(info.mcp, e.target));
+  q("#g-copy-cli").addEventListener("click", (e) => copy(info.cli, e.target));
+  q("#g-copy-curl").addEventListener("click", (e) => copy(info.curl, e.target));
+  q("#g-show").addEventListener("click", () => {
+    info.showKey = !info.showKey;
+    q("#g-show").textContent = info.showKey ? "Ẩn" : "Hiện";
+    if (info.kit) paint(info.kit);
+  });
+
+  load();
+}
+
+/* ---------- boot ---------- */
+
+buildLauncher();
+renderBar();
+tick();
+setInterval(tick, 1000);
+refreshState();
+setInterval(refreshState, 60000);
+window.addEventListener("resize", () => {
+  WINS.forEach((w, id) => {
+    if (window.innerWidth <= 760) w.el.classList.add("max");
+    else { w.el.classList.remove("max"); placeWindow(w, id); }
+  });
+});
+window.addEventListener("load", () => openApp("calc"));
+</script>
+</body>
+</html>

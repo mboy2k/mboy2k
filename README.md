@@ -14,14 +14,107 @@ Agent ──HTTP──> Hoplite Preview (HTTPS, token bảo mật của platform
 
 ## Chạy trên Hoplite (mặc định)
 
-Preview được quản lý bằng script đã cấu hình trong dự án:
+Preview được quản lý bằng hai script nằm trong repo (project settings trỏ vào chúng):
 
-- **Setup script** (idempotent): tạo `.venv`, cài `requirements.txt`, tải Chromium.
-- **Run script**: nạp `.env` (chứa `BROWSER_API_KEY`), chạy
-  `.venv/bin/python cloud_browser/app.py` tại cổng 3000.
+- **`scripts/hoplite_setup.sh`** (idempotent): tạo `.venv`, cài `requirements.txt`, tải Chromium,
+  và sinh `.env` với `BROWSER_API_KEY` mới nếu file chưa có.
+- **`scripts/hoplite_run.sh`**: nạp `.env`, ghi port manifest, chạy
+  `.venv/bin/python cloud_browser/app.py` tại cổng 3000 và tự khởi động lại nếu app thoát.
 
 Preview nằm trong Preview panel của thread (reference `agent-preview:3000/`).
 Sửa code xong chỉ cần start lại preview để nạp bản mới.
+
+## Máy tính Hoplite (Hoplite PC)
+
+Mở Preview là vào thẳng **Hoplite PC** — một "máy tính" chạy trong workspace, dùng được trên điện thoại:
+
+| App | Việc nó làm |
+|---|---|
+| 🧮 **Máy tính** | Máy tính bỏ túi: cộng/trừ/nhân/chia, `%`, `±`, hỗ trợ cả bàn phím máy tính |
+| ⌨️ **Terminal** | Gõ lệnh thẳng vào sandbox; shell giữ nguyên `cd` và biến môi trường giữa các lệnh |
+| 🤖 **Cho agent** | Bộ cấu hình để cắm máy này vào agent của Sếp: URL, API key, config MCP, lệnh curl mẫu |
+| 🔐 **Kết nối từ xa** | Trạng thái Tailscale + SSH: mở link đăng nhập, xem lệnh và mật khẩu để vào máy từ thiết bị khác |
+| 🌐 **Trình duyệt** | Lướt web bằng Chromium của sandbox: nhập địa chỉ hoặc từ khoá, chạm để click, cuộn, gõ chữ |
+
+Trang chủ hiển thị tên máy, kernel, RAM, thời gian chạy và **IP công khai kèm thành phố/quốc gia của máy**.
+Đồng hồ ở thanh dưới hiển thị giờ Việt Nam.
+
+UI gọi backend ở `/pc/*`; app Trình duyệt dùng chung pool session với REST/MCP, nên session mở từ UI
+vẫn điều khiển được bằng API và ngược lại. `/` và `/pc/*` không đòi `X-API-Key` vì đã nằm sau Preview
+của Hoplite — **chỉ mở từ Preview panel**, đừng dán link preview cho người khác vì Terminal chạy được
+lệnh trong máy.
+
+## Truy cập từ xa như máy thật (SSH qua Tailscale)
+
+`scripts/machine_access.sh` dựng "cửa vào" cho máy; nó idempotent và được gọi từ **cả** setup script
+(mỗi lần sandbox được cấp lại) **lẫn** run script kèm watchdog 20 giây, nên sshd/tailscaled tự sống lại.
+
+- **sshd** ở cổng 22, đăng nhập `ssh root@<tên máy>` — sandbox bật `no_new_privs` nên `sudo` không
+  dùng được cho user thường; vào thẳng root là cách duy nhất có toàn quyền.
+- **Tailscale chạy chế độ userspace** (không cần TUN): kết nối TCP vào port N của node được chuyển về
+  `localhost:N`, nên SSH chỉ mở trong mạng riêng của chủ máy, không phơi ra internet.
+- **Danh tính node nằm trong workspace** (`.hoplite/tailscale/tailscaled.state`, đã gitignore): sandbox
+  dựng lại vẫn là **đúng máy đó** trên mạng riêng, không phải đăng nhập lại.
+- Mật khẩu SSH sinh mỗi lần sandbox dựng lại, lưu ở `/var/lib/hoplite-pc/ssh-password` và hiện trong
+  app **🔐 Kết nối từ xa**.
+- `TS_AUTHKEY` (**auth key reusable**, dạng `tskey-auth-…`) ⇒ máy tự vào mạng riêng, không cần bấm gì.
+  Key sai/hết hạn thì script tự rơi về luồng đăng nhập thủ công, không chặn preview.
+- Không có key cũng được: app Kết nối từ xa hiện link đăng nhập, bấm **một lần** là xong và giữ luôn.
+- Thêm chìa khoá riêng để khỏi dùng mật khẩu: `BOSS_SSH_PUBKEY="ssh-ed25519 …"` hoặc ghi vào
+  `/var/lib/hoplite-pc/authorized_keys`.
+- Tuỳ biến: `PC_HOSTNAME` (mặc định `hoplite-pc`), `PC_SSH_USER` (mặc định `root`).
+
+Thiết bị của chủ máy cài Tailscale, đăng nhập cùng tài khoản, rồi:
+
+```bash
+ssh root@hoplite-pc        # MagicDNS nếu bật
+ssh root@100.x.y.z         # hoặc IP nội bộ hiện trong app Kết nối từ xa
+```
+
+**Giới hạn thật:** sandbox thuộc thread và bị thu hồi khi thread nghỉ — không có bộ hẹn giờ nào ở đây
+để "đánh thức" nó. Máy tự dựng lại đầy đủ khi sandbox được cấp lại (setup script chạy lại), và trong
+lúc máy sống thì watchdog giữ sshd/tailscaled/app luôn chạy. Muốn máy chạy liên tục thật sự thì thread
+phải được hoạt động đều (mở Preview/gửi tin) hoặc máy phải chạy trên hạ tầng riêng (VPS/Modal ở mục dưới).
+
+## Cho agent của bạn dùng máy
+
+Máy này là **máy của agent**: cùng một shell (giữ `cd`/biến môi trường), đọc/ghi file, xem thông tin máy,
+và có sẵn trình duyệt Chromium. Ba cách cắm, tuỳ agent hỗ trợ gì:
+
+**1. MCP (Claude Code, Cursor, Codex…)** — config lấy sẵn trong app 🤖 Cho agent:
+
+```json
+{
+  "mcpServers": {
+    "hoplite-machine": {
+      "url": "http://hoplite-pc:3000/mcp",
+      "headers": { "X-API-Key": "<key trong .env>" }
+    }
+  }
+}
+```
+
+Tools: `machine_run`, `machine_read_file`, `machine_write_file`, `machine_list_dir`, `machine_info`,
+`browser_open/snapshot/screenshot/click/type/eval/close`.
+
+**2. REST** — cho agent chỉ có tool HTTP, mọi endpoint cần `X-API-Key`:
+
+| Endpoint | Body (JSON) | Trả về |
+|---|---|---|
+| `POST /machine/exec` | `{cmd, timeout?}` | `{stdout, code, cwd}` — shell giữ trạng thái |
+| `POST /machine/read` | `{path, max_bytes?}` | `{content, size, truncated, binary}` |
+| `POST /machine/write` | `{path, content, append?}` | `{path, bytes}` — tự tạo thư mục cha |
+| `POST /machine/list` | `{path?}` | `{entries:[{name,type,size}]}` |
+| `GET /machine/info` | — | thông tin máy + thư mục hiện tại |
+
+**3. SSH** — agent nào chạy shell thuần thì `ssh root@hoplite-pc` làm mọi thứ.
+
+Địa chỉ gọi: qua Tailscale là `http://hoplite-pc:3000` (ổn định, khuyên dùng); không có tailnet thì dùng
+URL preview (đổi theo phiên). Chạy thử: `.venv/bin/python tests/machine_smoke.py <base> <key>`.
+Cũng có thể **cài agent chạy ngay trong máy** (vd `npm i -g @anthropic-ai/claude-code`) rồi điều khiển qua
+SSH/tmux — khi đó chính agent sống trong cái máy này.
+
+Lưu ý: `/machine/*` trao quyền root toàn bộ sandbox — API key chính là chìa khoá, giữ như giữ mật khẩu.
 
 ## Deploy nơi khác (tùy chọn)
 
@@ -75,7 +168,8 @@ Xem log: `journalctl -u cloud-browser -f`.
 | `POST /close` | `{session_id}` | `{ok}` |
 | `GET /health` | — | trạng thái service |
 
-Mọi endpoint (trừ `/health`) yêu cầu header `X-API-Key`. Tài liệu tương tác tại `/docs`.
+Mọi endpoint (trừ `/`, `/info`, `/health` và nhóm `/pc/*` của Hoplite PC) yêu cầu header `X-API-Key`.
+Thông tin service dạng JSON nằm ở `/info`; tài liệu tương tác tại `/docs`.
 Session sống 15 phút giữa các lần dùng (tự dọn), tối đa 8 session song song.
 
 ## Ví dụ cho agent
@@ -131,7 +225,7 @@ Cả ba điệu điều khiển cùng một pool phiên: session tạo bằng RE
 
 ```bash
 pip install -r requirements.txt && playwright install --with-deps chromium
-python cloud_browser/app.py        # chạy tại :8099, đặt BROWSER_API_KEY để bật auth
+python cloud_browser/app.py        # cổng theo PORT trong .env (mặc định 8099)
 ```
 
 ## Ghi chú
