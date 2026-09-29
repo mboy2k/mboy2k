@@ -92,6 +92,27 @@ Xem log: `journalctl -u cloud-browser -f`.
 
 Tùy chọn áp lúc tạo phiên; gửi lại kèm `session_id` với tùy chọn mới → phiên được tạo lại.
 
+### Lưu đăng nhập qua các lần đóng/mở (`profile`)
+
+Thêm `"profile": "ten-bat-ky"` vào body của `/open`: cookie và localStorage của phiên
+được lưu xuống đĩa lúc đóng, và nạp lại lần sau mở cùng tên profile — **đăng nhập một
+lần, giữ mãi** (kể cả qua lần restart service). Xem danh sách: `GET /profiles`;
+xóa sạch trạng thái: `POST /profiles/delete {"profile": "..."}`.
+
+Ví dụ: đăng nhập giữ được giữa các phiên:
+
+```bash
+curl -s $BASE/open -H "X-API-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"url":"https://shopee.vn","profile":"shop-cua-toi"}'
+# ... click, điền form, login ... khi agent xong:
+curl -s $BASE/close -H "X-API-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"session_id":"<sid>"}'
+# Lần sau mở lại profile "shop-cua-toi" là còn đăng nhập.
+```
+
+Mỗi profile hoạt động với mọi proxy — có thể giữ `profile: "tiktok"` qua IP Mỹ,
+`profile: "shopee"` qua IP Việt Nam song song.
+
 Ví dụ: mở trang qua proxy, giả máy iPhone, chặn ảnh:
 
 ```bash

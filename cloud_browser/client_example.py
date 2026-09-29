@@ -44,6 +44,17 @@ class CloudBrowser:
         r.raise_for_status()
         return r.json()
 
+    def list_profiles(self) -> dict:
+        r = httpx.get(f"{self.base}/profiles", headers=self.headers, timeout=60)
+        r.raise_for_status()
+        return r.json()
+
+    def delete_profile(self, profile: str) -> dict:
+        r = httpx.post(f"{self.base}/profiles/delete", headers=self.headers,
+                       json={"profile": profile}, timeout=60)
+        r.raise_for_status()
+        return r.json()
+
     def click(self, selector: str) -> dict:
         r = httpx.post(f"{self.base}/click", headers=self.headers,
                        json={"session_id": self.session_id, "selector": selector}, timeout=60)

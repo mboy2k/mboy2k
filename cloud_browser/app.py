@@ -6,6 +6,8 @@ with `python app.py` on any machine that has Playwright installed.
 
 import os
 import asyncio
+import re
+import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -19,6 +21,9 @@ from pydantic import BaseModel
 MAX_SESSIONS = int(os.environ.get("MAX_SESSIONS", "8"))
 SESSION_IDLE_TIMEOUT = int(os.environ.get("SESSION_IDLE_TIMEOUT", "900"))
 MAX_TEXT_CHARS = int(os.environ.get("MAX_TEXT_CHARS", "200000"))
+PROFILES_DIR = os.environ.get("BROWSER_PROFILES_DIR") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "browser_data"
+)
 
 USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -57,6 +62,7 @@ class Session:
     context: object = None
     page: object = None
     options: dict = field(default_factory=dict)
+    profile: Optional[str] = None
     last_used: float = field(default_factory=time.monotonic)
 
 
@@ -66,6 +72,14 @@ class BrowserPool:
         self._pw = None
         self._browsers: dict[str, object] = {}  # one browser process per proxy
         self.sessions: dict[str, Session] = {}
+        self._profile_sessions: dict[str, str] = {}  # profile -> session_id
+
+    def _profile_dir(self, profile: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", profile):
+            raise HTTPException(400, "profile name must match [A-Za-z0-9_-]{1,64}")
+        path = os.path.join(PROFILES_DIR, profile)
+        os.makedirs(path, exist_ok=True)
+        return path
 
     async def _ensure_browser(self, proxy: Optional[str] = None):
         if self._pw is None:
@@ -144,8 +158,17 @@ class BrowserPool:
                         await self.close(oldest)
                     if session_id is None:
                         session_id = uuid.uuid4().hex[:12]
-                    context = await browser.new_context(**self._context_options(options))
                     block_types = self._block_types(options.get("block_resources"))
+                    profile = options.get("profile")
+                    ctx_opts = self._context_options(options)
+                    if profile:
+                        # Chromium headless does not reliably flush its on-disk
+                        # cookie store, so profile state is snapshotted to a
+                        # storage_state file on close and reloaded here.
+                        state_path = os.path.join(self._profile_dir(profile), "state.json")
+                        if os.path.exists(state_path):
+                            ctx_opts["storage_state"] = state_path
+                    context = await browser.new_context(**ctx_opts)
                     if block_types:
                         async def _block(route):
                             if route.request.resource_type in block_types:
@@ -154,8 +177,10 @@ class BrowserPool:
                                 await route.continue_()
                         await context.route("**/*", _block)
                     page = await context.new_page()
-                    session = Session(context=context, page=page, options=dict(options))
+                    session = Session(context=context, page=page, options=dict(options), profile=profile)
                     self.sessions[session_id] = session
+                    if profile:
+                        self._profile_sessions[profile] = session_id
         session.last_used = time.monotonic()
         try:
             response = await session.page.goto(url, wait_until=wait_until, timeout=timeout_ms)
@@ -232,6 +257,13 @@ class BrowserPool:
     async def close(self, session_id: str):
         session = self.sessions.pop(session_id, None)
         if session:
+            if session.profile:
+                self._profile_sessions.pop(session.profile, None)
+                try:
+                    state_path = os.path.join(PROFILES_DIR, session.profile, "state.json")
+                    await session.context.storage_state(path=state_path)
+                except Exception:
+                    pass
             try:
                 await session.context.close()
             except Exception:
@@ -251,13 +283,14 @@ def build_mcp(pool: BrowserPool):
                            locale: str | None = None, timezone: str | None = None,
                            color_scheme: str | None = None,
                            block_resources: list[str] | None = None,
-                           geolocation: dict | None = None) -> dict:
+                           geolocation: dict | None = None,
+                           profile: str | None = None) -> dict:
         """Open a URL. Session options apply at creation; resend them to recreate the session."""
         options = {k: v for k, v in dict(
             proxy=proxy, user_agent=user_agent, viewport_width=viewport_width,
             viewport_height=viewport_height, locale=locale, timezone=timezone,
             color_scheme=color_scheme, block_resources=block_resources,
-            geolocation=geolocation,
+            geolocation=geolocation, profile=profile,
         ).items() if v is not None}
         return await pool.open(url, session_id, options=options)
 
@@ -308,6 +341,29 @@ def build_mcp(pool: BrowserPool):
         """Add cookies (list of Playwright cookie dicts with name/value/domain/path)."""
         session = pool._touch(session_id)
         await session.context.add_cookies(cookies)
+        return {"ok": True}
+
+    @mcp.tool()
+    async def browser_list_profiles() -> dict:
+        """List persistent login profiles (active flag shows which are open now)."""
+        import os as _os
+
+        items = []
+        if _os.path.isdir(PROFILES_DIR):
+            for name in sorted(_os.listdir(PROFILES_DIR)):
+                items.append({"name": name, "active": name in pool._profile_sessions})
+        return {"profiles": items}
+
+    @mcp.tool()
+    async def browser_delete_profile(profile: str) -> dict:
+        """Delete a persistent profile and its saved login state."""
+        sid = pool._profile_sessions.get(profile)
+        if sid:
+            await pool.close(sid)
+        pool._profile_dir(profile)  # validates the name
+        import shutil as _shutil
+
+        _shutil.rmtree(os.path.join(PROFILES_DIR, profile), ignore_errors=True)
         return {"ok": True}
 
     return mcp.streamable_http_app(), mcp.session_manager
@@ -373,6 +429,7 @@ def create_app() -> FastAPI:
         has_touch: bool = False
         device_scale_factor: float = 1
         block_resources: Optional[list] = None  # images, media, font, stylesheet
+        profile: Optional[str] = None  # persistent login profile, survives close/restart
 
     class SessionReq(BaseModel):
         session_id: str
@@ -382,6 +439,9 @@ def create_app() -> FastAPI:
 
     class CookiesSetReq(SessionReq):
         cookies: list  # Playwright cookie dicts
+
+    class ProfileReq(BaseModel):
+        profile: str
 
     class ShotReq(SessionReq):
         full_page: bool = False
@@ -476,6 +536,23 @@ def create_app() -> FastAPI:
             await session.context.add_cookies(req.cookies)
         except Exception as exc:
             raise HTTPException(400, f"add_cookies failed: {exc}")
+        return {"ok": True}
+
+    @app.get("/profiles", dependencies=[Depends(auth)])
+    async def list_profiles():
+        items = []
+        if os.path.isdir(PROFILES_DIR):
+            for name in sorted(os.listdir(PROFILES_DIR)):
+                items.append({"name": name, "active": name in pool._profile_sessions})
+        return {"profiles": items}
+
+    @app.post("/profiles/delete", dependencies=[Depends(auth)])
+    async def delete_profile(req: ProfileReq):
+        sid = pool._profile_sessions.get(req.profile)
+        if sid:
+            await pool.close(sid)
+        pool._profile_dir(req.profile)  # validates the name
+        shutil.rmtree(os.path.join(PROFILES_DIR, req.profile), ignore_errors=True)
         return {"ok": True}
 
     if mcp_app is not None:
