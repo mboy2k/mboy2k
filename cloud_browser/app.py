@@ -29,12 +29,34 @@ LAUNCH_ARGS = [
     "--disable-dev-shm-usage",
     "--disable-blink-features=AutomationControlled",
 ]
+BLOCKABLE = {
+    "images": {"image"},
+    "media": {"media"},
+    "font": {"font"},
+    "stylesheet": {"stylesheet"},
+}
+JS_MARKDOWN = """
+() => {
+  const md = [];
+  document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,blockquote,pre').forEach(el => {
+    const t = (el.innerText || '').trim(); if (!t) return;
+    const tag = el.tagName.toLowerCase();
+    if (tag.startsWith('h')) md.push('#'.repeat(+tag[1]) + ' ' + t);
+    else if (tag === 'li') md.push('- ' + t);
+    else if (tag === 'blockquote') md.push('> ' + t);
+    else if (tag === 'pre') md.push('```\\n' + t + '\\n```');
+    else md.push(t);
+  });
+  return md.join('\\n\\n');
+}
+"""
 
 
 @dataclass
 class Session:
     context: object = None
     page: object = None
+    options: dict = field(default_factory=dict)
     last_used: float = field(default_factory=time.monotonic)
 
 
@@ -42,17 +64,46 @@ class BrowserPool:
     def __init__(self):
         self._create_lock = asyncio.Lock()
         self._pw = None
-        self._browser = None
+        self._browsers: dict[str, object] = {}  # one browser process per proxy
         self.sessions: dict[str, Session] = {}
 
-    async def _ensure_browser(self):
-        if self._browser is not None and self._browser.is_connected():
-            return
+    async def _ensure_browser(self, proxy: Optional[str] = None):
         if self._pw is None:
             from playwright.async_api import async_playwright
 
             self._pw = await async_playwright().start()
-        self._browser = await self._pw.chromium.launch(headless=True, args=LAUNCH_ARGS)
+        key = proxy or ""
+        browser = self._browsers.get(key)
+        if browser is not None and browser.is_connected():
+            return browser
+        kwargs = {"headless": True, "args": LAUNCH_ARGS}
+        if proxy:
+            kwargs["proxy"] = {"server": proxy}
+        self._browsers[key] = await self._pw.chromium.launch(**kwargs)
+        return self._browsers[key]
+
+    @staticmethod
+    def _context_options(o: dict) -> dict:
+        opts = {
+            "user_agent": o.get("user_agent") or USER_AGENT,
+            "viewport": {"width": o.get("viewport_width", 1280), "height": o.get("viewport_height", 800)},
+            "locale": o.get("locale") or "en-US",
+            "timezone_id": o.get("timezone"),
+            "geolocation": o.get("geolocation"),
+            "permissions": o.get("permissions") or [],
+            "color_scheme": o.get("color_scheme") or "light",
+            "is_mobile": bool(o.get("is_mobile", False)),
+            "has_touch": bool(o.get("has_touch", False)),
+            "device_scale_factor": o.get("device_scale_factor", 1),
+        }
+        return {k: v for k, v in opts.items() if v is not None}
+
+    @staticmethod
+    def _block_types(names) -> set:
+        types: set = set()
+        for n in names or []:
+            types |= BLOCKABLE.get(n, set())
+        return types
 
     def _touch(self, session_id: str) -> Session:
         session = self.sessions.get(session_id)
@@ -68,12 +119,20 @@ class BrowserPool:
             await self.close(sid)
 
     async def open(self, url: str, session_id: Optional[str] = None,
-                   wait_until: str = "domcontentloaded", timeout_ms: int = 30000) -> dict:
+                   wait_until: str = "domcontentloaded", timeout_ms: int = 30000,
+                   options: Optional[dict] = None) -> dict:
         if not (url.startswith(("http://", "https://", "data:", "about:"))):
             raise HTTPException(400, "url must be http(s), data:, or about:blank")
+        options = options or {}
+        proxy = options.get("proxy")
+        if proxy and not proxy.startswith(("http://", "https://", "socks5://")):
+            raise HTTPException(400, "proxy must be http(s):// or socks5:// [user:pass@]host:port")
         await self._reap()
-        await self._ensure_browser()
+        browser = await self._ensure_browser(proxy)
         session = self.sessions.get(session_id) if session_id else None
+        if session is not None and options != session.options:
+            await self.close(session_id)  # recreate so new per-session options apply
+            session = None
         if session is None:
             # Serialize creation: concurrent opens would otherwise all pass the
             # cap check before any of them registers, racing past MAX_SESSIONS.
@@ -85,11 +144,17 @@ class BrowserPool:
                         await self.close(oldest)
                     if session_id is None:
                         session_id = uuid.uuid4().hex[:12]
-                    context = await self._browser.new_context(
-                        user_agent=USER_AGENT, viewport={"width": 1280, "height": 800}, locale="en-US",
-                    )
+                    context = await browser.new_context(**self._context_options(options))
+                    block_types = self._block_types(options.get("block_resources"))
+                    if block_types:
+                        async def _block(route):
+                            if route.request.resource_type in block_types:
+                                await route.abort()
+                            else:
+                                await route.continue_()
+                        await context.route("**/*", _block)
                     page = await context.new_page()
-                    session = Session(context=context, page=page)
+                    session = Session(context=context, page=page, options=dict(options))
                     self.sessions[session_id] = session
         session.last_used = time.monotonic()
         try:
@@ -102,10 +167,13 @@ class BrowserPool:
             "http_status": response.status if response else None,
         }
 
-    async def snapshot(self, session_id: str) -> dict:
+    async def snapshot(self, session_id: str, fmt: str = "text") -> dict:
         page = self._touch(session_id).page
         title = await page.title()
-        text = await page.evaluate("document.body ? document.body.innerText : ''")
+        if fmt == "markdown":
+            text = await page.evaluate(JS_MARKDOWN)
+        else:
+            text = await page.evaluate("document.body ? document.body.innerText : ''")
         links = await page.eval_on_selector_all(
             "a[href]",
             "els => els.map(e => ({text: (e.innerText || '').trim().slice(0, 120), href: e.href}))"
@@ -177,14 +245,26 @@ def build_mcp(pool: BrowserPool):
     mcp = FastMCP("cloud-browser")
 
     @mcp.tool()
-    async def browser_open(url: str, session_id: str | None = None) -> dict:
-        """Open a URL in the cloud browser (new or existing session). Returns session_id."""
-        return await pool.open(url, session_id)
+    async def browser_open(url: str, session_id: str | None = None,
+                           proxy: str | None = None, user_agent: str | None = None,
+                           viewport_width: int = 1280, viewport_height: int = 800,
+                           locale: str | None = None, timezone: str | None = None,
+                           color_scheme: str | None = None,
+                           block_resources: list[str] | None = None,
+                           geolocation: dict | None = None) -> dict:
+        """Open a URL. Session options apply at creation; resend them to recreate the session."""
+        options = {k: v for k, v in dict(
+            proxy=proxy, user_agent=user_agent, viewport_width=viewport_width,
+            viewport_height=viewport_height, locale=locale, timezone=timezone,
+            color_scheme=color_scheme, block_resources=block_resources,
+            geolocation=geolocation,
+        ).items() if v is not None}
+        return await pool.open(url, session_id, options=options)
 
     @mcp.tool()
-    async def browser_snapshot(session_id: str) -> dict:
-        """Get title, rendered text and links of the current page."""
-        return await pool.snapshot(session_id)
+    async def browser_snapshot(session_id: str, format: str = "text") -> dict:
+        """Get title, page text (format=text|markdown) and links of the current page."""
+        return await pool.snapshot(session_id, format)
 
     @mcp.tool()
     async def browser_click(session_id: str, selector: str) -> dict:
@@ -215,6 +295,19 @@ def build_mcp(pool: BrowserPool):
     async def browser_close(session_id: str) -> dict:
         """Close a browser session."""
         await pool.close(session_id)
+        return {"ok": True}
+
+    @mcp.tool()
+    async def browser_get_cookies(session_id: str) -> dict:
+        """Get all cookies of the session."""
+        session = pool._touch(session_id)
+        return {"cookies": await session.context.cookies()}
+
+    @mcp.tool()
+    async def browser_set_cookies(session_id: str, cookies: list) -> dict:
+        """Add cookies (list of Playwright cookie dicts with name/value/domain/path)."""
+        session = pool._touch(session_id)
+        await session.context.add_cookies(cookies)
         return {"ok": True}
 
     return mcp.streamable_http_app(), mcp.session_manager
@@ -265,9 +358,30 @@ def create_app() -> FastAPI:
         session_id: Optional[str] = None
         wait_until: str = "domcontentloaded"
         timeout_ms: int = 30000
+        # Per-session customization; applied when the session is created,
+        # resend with the same session_id to recreate it with new options.
+        proxy: Optional[str] = None
+        user_agent: Optional[str] = None
+        viewport_width: int = 1280
+        viewport_height: int = 800
+        locale: Optional[str] = None
+        timezone: Optional[str] = None
+        geolocation: Optional[dict] = None
+        permissions: Optional[list] = None
+        color_scheme: Optional[str] = None
+        is_mobile: bool = False
+        has_touch: bool = False
+        device_scale_factor: float = 1
+        block_resources: Optional[list] = None  # images, media, font, stylesheet
 
     class SessionReq(BaseModel):
         session_id: str
+
+    class SnapshotReq(SessionReq):
+        format: str = "text"  # text | markdown
+
+    class CookiesSetReq(SessionReq):
+        cookies: list  # Playwright cookie dicts
 
     class ShotReq(SessionReq):
         full_page: bool = False
@@ -309,11 +423,12 @@ def create_app() -> FastAPI:
 
     @app.post("/open", dependencies=[Depends(auth)])
     async def open_url(req: OpenReq):
-        return await pool.open(req.url, req.session_id, req.wait_until, req.timeout_ms)
+        options = req.model_dump(exclude={"url", "session_id", "wait_until", "timeout_ms"}, exclude_none=True)
+        return await pool.open(req.url, req.session_id, req.wait_until, req.timeout_ms, options)
 
     @app.post("/snapshot", dependencies=[Depends(auth)])
-    async def snapshot(req: SessionReq):
-        return await pool.snapshot(req.session_id)
+    async def snapshot(req: SnapshotReq):
+        return await pool.snapshot(req.session_id, req.format)
 
     @app.post("/screenshot", dependencies=[Depends(auth)])
     async def screenshot(req: ShotReq):
@@ -347,6 +462,20 @@ def create_app() -> FastAPI:
     @app.post("/close", dependencies=[Depends(auth)])
     async def close(req: SessionReq):
         await pool.close(req.session_id)
+        return {"ok": True}
+
+    @app.get("/cookies", dependencies=[Depends(auth)])
+    async def get_cookies(session_id: str):
+        session = pool._touch(session_id)
+        return {"cookies": await session.context.cookies()}
+
+    @app.post("/cookies", dependencies=[Depends(auth)])
+    async def set_cookies(req: CookiesSetReq):
+        session = pool._touch(req.session_id)
+        try:
+            await session.context.add_cookies(req.cookies)
+        except Exception as exc:
+            raise HTTPException(400, f"add_cookies failed: {exc}")
         return {"ok": True}
 
     if mcp_app is not None:

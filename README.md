@@ -64,8 +64,8 @@ Xem log: `journalctl -u cloud-browser -f`.
 
 | Endpoint | Body (JSON) | Trả về |
 |---|---|---|
-| `POST /open` | `{url, session_id?, timeout_ms?}` | `{session_id, url, http_status}` |
-| `POST /snapshot` | `{session_id}` | `{title, url, text, links[]}` — nội dung đã render JS |
+| `POST /open` | `{url, session_id?, timeout_ms?, ...tùy chọn}` | `{session_id, url, http_status}` |
+| `POST /snapshot` | `{session_id, format?}` (`text`\|`markdown`) | `{title, url, text, links[]}` |
 | `POST /screenshot` | `{session_id, full_page?}` | ảnh PNG |
 | `POST /click` | `{session_id, selector}` | `{ok}` |
 | `POST /type` | `{session_id, selector, text, submit?}` | `{ok}` |
@@ -73,7 +73,38 @@ Xem log: `journalctl -u cloud-browser -f`.
 | `POST /eval` | `{session_id, script}` | kết quả JS |
 | `POST /wait` | `{session_id, selector}` | `{ok}` |
 | `POST /close` | `{session_id}` | `{ok}` |
+| `GET/POST /cookies` | POST: `{session_id, cookies[]}` | đọc/ghi cookie của phiên |
 | `GET /health` | — | trạng thái service |
+
+### Tùy biến theo phiên (đặt trong body của `/open`)
+
+| Trường | Ý nghĩa |
+|---|---|
+| `proxy` | Proxy cho riêng phiên này: `http://host:port`, `http://user:pass@host:port` hoặc `socks5://...`. Mỗi proxy khác nhau chạy một process Chromium riêng |
+| `user_agent` | Tự đặt UA (giả máy thật, mobile, bot Google...) |
+| `viewport_width` / `viewport_height` | Kích thước cửa sổ |
+| `locale`, `timezone` | Ngôn ngữ và múi giờ (VD `vi-VN`, `Asia/Ho_Chi_Minh`) |
+| `geolocation` | `{"latitude": 10.8, "longitude": 106.7}` |
+| `permissions` | `["geolocation", "notifications"]` |
+| `color_scheme` | `light` / `dark` |
+| `is_mobile`, `has_touch`, `device_scale_factor` | Giả lập điện thoại |
+| `block_resources` | `["images","media","font","stylesheet"]` — chặn tải tài nguyên nặng, tiết kiệm băng thông/RAM |
+
+Tùy chọn áp lúc tạo phiên; gửi lại kèm `session_id` với tùy chọn mới → phiên được tạo lại.
+
+Ví dụ: mở trang qua proxy, giả máy iPhone, chặn ảnh:
+
+```bash
+curl -s $BASE/open -H "X-API-Key: $KEY" -H 'Content-Type: application/json' -d '{
+  "url": "https://example.com",
+  "session_id": "iphone1",
+  "proxy": "socks5://user:pass@proxy-host:1080",
+  "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+  "viewport_width": 390, "viewport_height": 844, "is_mobile": true, "has_touch": true,
+  "locale": "vi-VN", "timezone": "Asia/Ho_Chi_Minh",
+  "block_resources": ["images", "media", "font"]
+}'
+```
 
 Mọi endpoint (trừ `/health`) yêu cầu header `X-API-Key`. Tài liệu tương tác tại `/docs`.
 Session sống 15 phút giữa các lần dùng (tự dọn), tối đa 8 session song song.

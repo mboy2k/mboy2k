@@ -12,16 +12,35 @@ class CloudBrowser:
         self.headers = {"X-API-Key": api_key} if api_key else {}
         self.session_id: str | None = None
 
-    def open(self, url: str, session_id: str | None = None) -> dict:
+    def open(self, url: str, session_id: str | None = None, **options) -> dict:
+        payload = {"url": url}
+        if session_id:
+            payload["session_id"] = session_id
+        payload.update(options)
         r = httpx.post(f"{self.base}/open", headers=self.headers,
-                       json={"url": url, "session_id": session_id}, timeout=120)
+                       json=payload, timeout=120)
         r.raise_for_status()
         self.session_id = r.json()["session_id"]
         return r.json()
 
-    def snapshot(self) -> dict:
+    def snapshot(self, format: str | None = None) -> dict:
+        payload = {"session_id": self.session_id}
+        if format:
+            payload["format"] = format
         r = httpx.post(f"{self.base}/snapshot", headers=self.headers,
-                       json={"session_id": self.session_id}, timeout=60)
+                       json=payload, timeout=60)
+        r.raise_for_status()
+        return r.json()
+
+    def get_cookies(self) -> dict:
+        r = httpx.get(f"{self.base}/cookies", headers=self.headers,
+                      params={"session_id": self.session_id}, timeout=60)
+        r.raise_for_status()
+        return r.json()
+
+    def set_cookies(self, cookies: list) -> dict:
+        r = httpx.post(f"{self.base}/cookies", headers=self.headers,
+                       json={"session_id": self.session_id, "cookies": cookies}, timeout=60)
         r.raise_for_status()
         return r.json()
 
