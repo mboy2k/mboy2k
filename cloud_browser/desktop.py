@@ -8,10 +8,12 @@ through the thread's Hoplite Preview, which keeps access inside the workspace.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import platform
 import re
 import socket
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -29,6 +31,10 @@ UI_FILE = BASE_DIR / "desktop_ui.html"
 TERM_TIMEOUT = int(os.environ.get("PC_TERM_TIMEOUT", "60"))
 VIEWPORT = {"width": 1280, "height": 800}
 GEO_TTL = 600
+TS_BIN = "/usr/local/bin/tailscale"
+TS_SOCKET = "/var/run/tailscale/tailscaled.sock"
+ACCESS_STATE = Path("/var/lib/hoplite-pc")
+SSH_USER = os.environ.get("PC_SSH_USER", "root")
 _GEO: dict = {"data": None, "at": 0.0}
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
@@ -190,6 +196,72 @@ def normalize_url(raw: str) -> str:
     return "https://www.google.com/search?q=" + quote(raw)
 
 
+def _tailscale_status() -> dict:
+    if not Path(TS_BIN).exists():
+        return {"installed": False, "state": "not_installed"}
+    try:
+        proc = subprocess.run(
+            [TS_BIN, "--socket", TS_SOCKET, "status", "--json"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception as exc:
+        return {"installed": True, "state": "error", "error": str(exc)[:200]}
+    if proc.returncode != 0:
+        return {"installed": True, "state": "not_running",
+                "error": (proc.stderr or "").strip()[:200]}
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except Exception:
+        data = {}
+    self_node = data.get("Self") or {}
+    ips = self_node.get("TailscaleIPs") or []
+    ipv4 = [ip for ip in ips if ":" not in ip]
+    return {
+        "installed": True,
+        "state": data.get("BackendState") or "unknown",
+        "auth_url": data.get("AuthURL") or "",
+        "hostname": self_node.get("HostName") or "",
+        "dns_name": (self_node.get("DNSName") or "").rstrip("."),
+        "ip": (ipv4 or ips or [""])[0],
+        "online": bool(self_node.get("Online")),
+    }
+
+
+def _sshd_up() -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", 22), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+def access_report() -> dict:
+    tailscale = _tailscale_status()
+    password = ""
+    try:
+        password = (ACCESS_STATE / "ssh-password").read_text().strip()
+    except OSError:
+        pass
+    target = tailscale.get("dns_name") or tailscale.get("ip") or ""
+    keys = ""
+    try:
+        keys = (Path("/home") / SSH_USER / ".ssh" / "authorized_keys").read_text()
+    except OSError:
+        pass
+    return {
+        "tailscale": tailscale,
+        "sshd": _sshd_up(),
+        "ssh": {
+            "user": SSH_USER,
+            "port": 22,
+            "password": password,
+            "target": target,
+            "command": f"ssh {SSH_USER}@{target}" if target else "",
+            "key_logins": len([line for line in keys.splitlines() if line.strip()]),
+        },
+    }
+
+
 class TermReq(BaseModel):
     cmd: str
     timeout: int = TERM_TIMEOUT
@@ -224,6 +296,10 @@ def build_desktop_router(pool) -> APIRouter:
         payload["geo"] = await _geo()
         payload["active_sessions"] = len(pool.sessions)
         return payload
+
+    @router.get("/pc/access")
+    def pc_access():
+        return access_report()
 
     @router.post("/pc/term/run")
     async def term_run(req: TermReq):

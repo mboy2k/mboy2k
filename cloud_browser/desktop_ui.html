@@ -107,6 +107,24 @@
   .br-status{padding:6px 10px;border-top:1px solid var(--line);color:var(--muted);font-size:11.5px;
              white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
+  /* remote access */
+  .acc{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+  .acc-head{display:flex;align-items:center;gap:10px}
+  .acc-head .badge{padding:4px 10px;border-radius:999px;font-size:12px;border:1px solid var(--line)}
+  .acc-head .badge.ok{background:rgba(34,211,166,.18);border-color:var(--accent2)}
+  .acc-head .badge.warn{background:rgba(255,107,129,.16);border-color:var(--danger)}
+  .acc-head button{margin-left:auto;border:1px solid var(--line);background:rgba(255,255,255,.07);
+                   border-radius:9px;padding:6px 10px;font-size:12.5px}
+  .acc-card{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,.04);
+            display:flex;flex-direction:column;gap:8px}
+  .acc-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .acc-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}
+  .acc-line code{background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12.5px}
+  .acc-line span{color:var(--muted);font-size:12.5px}
+  .acc-line button{border:1px solid var(--line);background:rgba(255,255,255,.07);border-radius:8px;padding:5px 9px;font-size:12.5px}
+  .acc-note{color:var(--muted);font-size:12.5px;margin:0}
+  .acc button.primary{border:1px solid var(--line);background:var(--accent);border-radius:9px;padding:9px 12px}
+
   @media (max-width:760px){
     .win{left:0!important;top:0!important;width:100%!important;height:calc(100% - 56px)!important;border-radius:0}
     .win-head{cursor:default}
@@ -139,6 +157,7 @@
 const APPS = {
   calc:    {title:"Máy tính",   icon:"🧮", size:[340, 470], build:buildCalc},
   term:    {title:"Terminal",   icon:"⌨️", size:[660, 430], build:buildTerm},
+  access:  {title:"Kết nối từ xa", icon:"🔐", size:[560, 470], build:buildAccess},
   browser: {title:"Trình duyệt",icon:"🌐", size:[960, 620], build:buildBrowser},
 };
 const QUICK_LINKS = [
@@ -618,6 +637,85 @@ function buildBrowser(w) {
 
   startPage();
   status.textContent = "Chưa mở trang nào — chọn nhanh hoặc gõ địa chỉ.";
+}
+
+/* ---------- remote access ---------- */
+
+function buildAccess(w) {
+  w.body.innerHTML = '<div class="acc">' +
+    '<div class="acc-head"><span id="a-badge" class="badge">Đang kiểm tra…</span>' +
+    '<button id="a-refresh">⟳ Làm mới</button></div>' +
+    '<p class="acc-note" id="a-ts"></p>' +
+    '<div class="acc-card" id="a-login" style="display:none">' +
+    '<div class="acc-label">Bước 1 — nối máy vào mạng riêng</div>' +
+    '<p class="acc-note">Máy chưa vào mạng Tailscale. Bấm nút dưới, đăng nhập bằng tài khoản Tailscale của Sếp, xong quay lại bấm "Làm mới".</p>' +
+    '<button class="primary" id="a-login-btn">Mở trang đăng nhập Tailscale</button></div>' +
+    '<div class="acc-card"><div class="acc-label">Bước 2 — SSH từ thiết bị của Sếp</div>' +
+    '<div class="acc-line"><code id="a-cmd">—</code><button id="a-copy-cmd">Copy lệnh</button></div>' +
+    '<div class="acc-line"><span>user</span><code id="a-user">root</code>' +
+    '<span>mật khẩu</span><code id="a-pw">••••••••</code>' +
+    '<button id="a-show">Hiện</button><button id="a-copy-pw">Copy</button></div></div>' +
+    '<p class="acc-note">Thiết bị cần cài Tailscale (miễn phí) và đăng nhập cùng tài khoản, sau đó chạy lệnh SSH ở trên — hoặc dùng app SSH trên điện thoại (Termius, Termux…) với cùng user/mật khẩu. ' +
+    'Đăng nhập là root nên toàn quyền (sandbox bật no_new_privs, sudo không dùng được). Có chìa khoá riêng thì khỏi cần mật khẩu. Mật khẩu đổi mỗi lần sandbox dựng lại.</p></div>';
+
+  const badge = w.body.querySelector("#a-badge");
+  const tsLine = w.body.querySelector("#a-ts");
+  const loginBox = w.body.querySelector("#a-login");
+  const loginBtn = w.body.querySelector("#a-login-btn");
+  const cmdLine = w.body.querySelector("#a-cmd");
+  const pwLine = w.body.querySelector("#a-pw");
+  const info = {data:null, showPw:false};
+
+  const paint = (d) => {
+    info.data = d;
+    const t = d.tailscale || {};
+    const connected = t.state === "Running";
+    badge.textContent = connected ? "Đã vào mạng riêng Tailscale"
+      : t.state === "NeedsLogin" ? "Cần đăng nhập Tailscale"
+      : t.installed ? "Chưa bật được Tailscale" : "Chưa cài Tailscale";
+    badge.className = "badge " + (connected ? "ok" : "warn");
+    tsLine.textContent = connected
+      ? "Tên máy trên mạng riêng: " + (t.dns_name || t.hostname || "hoplite-pc") + (t.ip ? " · IP nội bộ " + t.ip : "")
+      : (t.state === "NeedsLogin" ? "Máy đang chờ Sếp đăng nhập — chỉ cần làm một lần cho mỗi lần sandbox dựng lại."
+         : (t.error || "Tailscale chưa sẵn sàng, bấm Làm mới sau ít giây."));
+    loginBox.style.display = (!connected && t.auth_url) ? "" : "none";
+    loginBtn.onclick = () => t.auth_url && window.open(t.auth_url, "_blank", "noopener");
+    cmdLine.textContent = d.ssh && d.ssh.command ? d.ssh.command : "chờ máy vào mạng riêng";
+    w.body.querySelector("#a-user").textContent = (d.ssh && d.ssh.user) || "root";
+    pwLine.textContent = info.showPw ? ((d.ssh && d.ssh.password) || "—") : "••••••••";
+  };
+
+  const load = async () => {
+    try {
+      paint(await api("/pc/access"));
+    } catch (err) {
+      badge.textContent = "Lỗi: " + err.message;
+      badge.className = "badge warn";
+    }
+  };
+
+  w.body.querySelector("#a-refresh").addEventListener("click", load);
+  w.body.querySelector("#a-show").addEventListener("click", () => {
+    info.showPw = !info.showPw;
+    w.body.querySelector("#a-show").textContent = info.showPw ? "Ẩn" : "Hiện";
+    if (info.data) paint(info.data);
+  });
+  const copy = (text, btn) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      const old = btn.textContent; btn.textContent = "Đã copy";
+      setTimeout(() => { btn.textContent = old; }, 1200);
+    }).catch(() => {});
+  };
+  w.body.querySelector("#a-copy-cmd").addEventListener("click", (e) => copy(cmdLine.textContent, e.target));
+  w.body.querySelector("#a-copy-pw").addEventListener("click", (e) =>
+    copy(info.data && info.data.ssh && info.data.ssh.password, e.target));
+
+  load();
+  const timer = setInterval(() => {
+    if (WINS.get("access") !== w) { clearInterval(timer); return; }
+    load();
+  }, 6000);
 }
 
 /* ---------- boot ---------- */

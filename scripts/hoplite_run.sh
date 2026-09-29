@@ -19,6 +19,10 @@ if [ -n "${HOPLITE_PREVIEW_MANIFEST_PATH:-}" ]; then
     > "$HOPLITE_PREVIEW_MANIFEST_PATH"
 fi
 
+# Keep the remote door (sshd + tailscale) alive next to the app.
+bash "$WORKSPACE/scripts/machine_access.sh" --quiet || true
+( while true; do sleep 20; bash "$WORKSPACE/scripts/machine_access.sh" --quiet >/dev/null 2>&1 || true; done ) &
+
 while true; do
   "$WORKSPACE/.venv/bin/python" cloud_browser/app.py
   code=$?

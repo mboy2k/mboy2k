@@ -20,4 +20,7 @@ if [ ! -f .env ]; then
   echo "hoplite-setup: da tao .env voi BROWSER_API_KEY moi"
 fi
 
+# Remote door: sshd + tailscale. A failure here must not block the preview.
+bash scripts/machine_access.sh --quiet || echo "hoplite-setup: canh bao: chua bat duoc truy cap tu xa"
+
 echo "hoplite-setup: ${WORKSPACE} san sang (venv + deps + Chromium + .env)"
