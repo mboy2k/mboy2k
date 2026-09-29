@@ -17,8 +17,10 @@ from pydantic import BaseModel
 
 try:  # app.py runs both as a script and as cloud_browser.app
     from desktop import UI_FILE, build_desktop_router
+    from machine import add_machine_tools, build_machine_router, get_machine
 except ImportError:
     from cloud_browser.desktop import UI_FILE, build_desktop_router
+    from cloud_browser.machine import add_machine_tools, build_machine_router, get_machine
 
 MAX_SESSIONS = int(os.environ.get("MAX_SESSIONS", "8"))
 SESSION_IDLE_TIMEOUT = int(os.environ.get("SESSION_IDLE_TIMEOUT", "900"))
@@ -197,8 +199,8 @@ class BrowserPool:
                 pass
 
 
-def build_mcp(pool: BrowserPool):
-    """MCP (Model Context Protocol) server so MCP-capable agents can use the browser natively."""
+def build_mcp(pool: BrowserPool, machine):
+    """MCP server so MCP-capable agents can drive both the machine and the browser."""
     from mcp.server.fastmcp import FastMCP
 
     mcp = FastMCP("cloud-browser")
@@ -244,6 +246,8 @@ def build_mcp(pool: BrowserPool):
         await pool.close(session_id)
         return {"ok": True}
 
+    add_machine_tools(mcp, machine)
+
     return mcp.streamable_http_app(), mcp.session_manager
 
 
@@ -253,11 +257,12 @@ def create_app() -> FastAPI:
 
     api_key = os.environ.get("BROWSER_API_KEY", "")
     pool = BrowserPool()
+    machine = get_machine()
 
     mcp_app = None
     mcp_session_manager = None
     try:
-        mcp_app, mcp_session_manager = build_mcp(pool)
+        mcp_app, mcp_session_manager = build_mcp(pool, machine)
     except Exception:
         mcp_app = None  # REST keeps working if the MCP SDK is absent
 
@@ -382,7 +387,8 @@ def create_app() -> FastAPI:
         await pool.close(req.session_id)
         return {"ok": True}
 
-    app.include_router(build_desktop_router(pool))
+    app.include_router(build_desktop_router(pool, api_key))
+    app.include_router(build_machine_router(machine), dependencies=[Depends(auth)])
 
     if mcp_app is not None:
         # Mounted last so REST routes match first. FastMCP serves at /mcp inside

@@ -7,15 +7,11 @@ through the thread's Hoplite Preview, which keeps access inside the workspace.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
-import platform
-import re
 import socket
 import subprocess
 import time
-import uuid
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
@@ -36,125 +32,25 @@ TS_SOCKET = "/var/run/tailscale/tailscaled.sock"
 ACCESS_STATE = Path("/var/lib/hoplite-pc")
 SSH_USER = os.environ.get("PC_SSH_USER", "root")
 _GEO: dict = {"data": None, "at": 0.0}
-_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
-
-class ShellSession:
-    """A single persistent bash so `cd` and exported vars survive between commands."""
-
-    def __init__(self, cwd: Path) -> None:
-        self.cwd = cwd
-        self.proc: Optional[asyncio.subprocess.Process] = None
-        self.buf = b""
-        self.lock = asyncio.Lock()
-
-    async def _ensure(self) -> None:
-        if self.proc is None or self.proc.returncode is not None:
-            self.proc = await asyncio.create_subprocess_exec(
-                "/bin/bash", "--noprofile", "--norc", "-s",
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                cwd=str(WORKSPACE),
-            )
-            self.buf = b""
-
-    async def _stop(self) -> None:
-        proc, self.proc = self.proc, None
-        if proc is not None and proc.returncode is None:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            try:
-                await proc.wait()
-            except Exception:
-                pass
-
-    async def _read_until(self, marker: bytes) -> tuple[bytes, bytes]:
-        while marker not in self.buf:
-            chunk = await self.proc.stdout.read(65536)
-            if not chunk:
-                raise RuntimeError("shell da thoat")
-            self.buf += chunk
-        head, rest = self.buf.split(marker, 1)
-        while b">>>" not in rest:
-            chunk = await self.proc.stdout.read(65536)
-            if not chunk:
-                raise RuntimeError("shell da thoat")
-            rest += chunk
-        meta, _, tail = rest.partition(b">>>")
-        self.buf = tail
-        return head, meta
-
-    async def run(self, cmd: str, timeout: int = TERM_TIMEOUT) -> dict:
-        cmd = cmd.strip()
-        if not cmd:
-            return {"stdout": "", "code": 0, "cwd": str(self.cwd)}
-        async with self.lock:
-            await self._ensure()
-            token = uuid.uuid4().hex[:10]
-            marker = f"<<<END:{token}:"
-            self.proc.stdin.write(
-                f"{cmd}\n__rc=$?\nprintf '\\n{marker}%s:%s>>>\\n' \"$__rc\" \"$PWD\"\n".encode()
-            )
-            try:
-                await self.proc.stdin.drain()
-                head, meta = await asyncio.wait_for(self._read_until(marker.encode()), timeout)
-            except asyncio.TimeoutError:
-                await self._stop()
-                raise HTTPException(504, f"lenh chay qua {timeout}s, em da khoi dong lai shell")
-            except Exception as exc:
-                await self._stop()
-                raise HTTPException(500, f"terminal loi: {exc}")
-            code_s, _, cwd = meta.decode(errors="replace").partition(":")
-            code = int(code_s) if code_s.strip().lstrip("-").isdigit() else -1
-            if cwd.strip():
-                self.cwd = Path(cwd.strip())
-            return {
-                "stdout": _ANSI.sub("", head.decode(errors="replace")).lstrip("\n"),
-                "code": code,
-                "cwd": str(self.cwd),
-            }
+try:  # app.py runs both as a script and as cloud_browser.app
+    from machine import get_machine
+except ImportError:
+    from cloud_browser.machine import get_machine
 
 
 class DesktopState:
     def __init__(self, pool) -> None:
         self.pool = pool
-        self.shell = ShellSession(WORKSPACE)
+        self.machine = get_machine()
+        self.shell = self.machine.shell
         self.browser_session: Optional[str] = None
-        self.started = time.time()
-
-    @staticmethod
-    def _meminfo() -> tuple[int, int]:
-        try:
-            fields = {}
-            for line in Path("/proc/meminfo").read_text().splitlines():
-                key, _, value = line.partition(":")
-                fields[key] = int(value.split()[0])
-            total = fields.get("MemTotal", 0) // 1024
-            return total, max(total - fields.get("MemAvailable", 0) // 1024, 0)
-        except Exception:
-            return 0, 0
 
     def snapshot(self) -> dict:
-        total_mb, used_mb = self._meminfo()
-        try:
-            uptime = float(Path("/proc/uptime").read_text().split()[0])
-        except Exception:
-            uptime = time.time() - self.started
-        return {
-            "host": socket.gethostname(),
-            "kernel": platform.platform(),
-            "cpu_count": os.cpu_count(),
-            "mem_total_mb": total_mb,
-            "mem_used_mb": used_mb,
-            "workspace": str(WORKSPACE),
-            "cwd": str(self.shell.cwd),
-            "uptime_s": round(uptime),
-            "viewport": VIEWPORT,
-            "browser_session": self.browser_session,
-        }
+        payload = self.machine.info()
+        payload["viewport"] = VIEWPORT
+        payload["browser_session"] = self.browser_session
+        return payload
 
 
 async def _geo() -> dict:
@@ -286,7 +182,7 @@ class BrowserActionReq(BrowserSessionReq):
     url: Optional[str] = None
 
 
-def build_desktop_router(pool) -> APIRouter:
+def build_desktop_router(pool, api_key: str = "") -> APIRouter:
     state = DesktopState(pool)
     router = APIRouter()
 
@@ -300,6 +196,39 @@ def build_desktop_router(pool) -> APIRouter:
     @router.get("/pc/access")
     def pc_access():
         return access_report()
+
+    @router.get("/pc/agent")
+    async def pc_agent_kit():
+        # Connection kit for the owner's coding agent: the URL it should call and
+        # the key it must send. Same trust level as the desktop itself.
+        ts = _tailscale_status()
+        dns = ts.get("dns_name") or ""
+        ip = ts.get("ip") or ""
+        running = ts.get("state") == "Running" and bool(dns or ip)
+        return {
+            "workspace": str(WORKSPACE),
+            "api_key": api_key,
+            "api_key_required": bool(api_key),
+            "tailnet": {
+                "running": running,
+                "base_url": f"http://{dns or ip}:3000" if running else "",
+                "dns_name": dns,
+                "ip": ip,
+            },
+            "mcp_url": "/mcp",
+            "tools": [
+                "machine_info", "machine_run", "machine_read_file", "machine_write_file",
+                "machine_list_dir", "browser_open", "browser_snapshot", "browser_screenshot",
+                "browser_click", "browser_type", "browser_eval", "browser_close",
+            ],
+            "rest": {
+                "machine_info": "GET /machine/info",
+                "machine_run": "POST /machine/exec {cmd, timeout?}",
+                "machine_read_file": "POST /machine/read {path, max_bytes?}",
+                "machine_write_file": "POST /machine/write {path, content, append?}",
+                "machine_list_dir": "POST /machine/list {path?}",
+            },
+        }
 
     @router.post("/pc/term/run")
     async def term_run(req: TermReq):

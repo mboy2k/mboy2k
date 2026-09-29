@@ -32,6 +32,7 @@ Mở Preview là vào thẳng **Hoplite PC** — một "máy tính" chạy trong
 |---|---|
 | 🧮 **Máy tính** | Máy tính bỏ túi: cộng/trừ/nhân/chia, `%`, `±`, hỗ trợ cả bàn phím máy tính |
 | ⌨️ **Terminal** | Gõ lệnh thẳng vào sandbox; shell giữ nguyên `cd` và biến môi trường giữa các lệnh |
+| 🤖 **Cho agent** | Bộ cấu hình để cắm máy này vào agent của Sếp: URL, API key, config MCP, lệnh curl mẫu |
 | 🔐 **Kết nối từ xa** | Trạng thái Tailscale + SSH: mở link đăng nhập, xem lệnh và mật khẩu để vào máy từ thiết bị khác |
 | 🌐 **Trình duyệt** | Lướt web bằng Chromium của sandbox: nhập địa chỉ hoặc từ khoá, chạm để click, cuộn, gõ chữ |
 
@@ -74,6 +75,46 @@ ssh root@100.x.y.z         # hoặc IP nội bộ hiện trong app Kết nối t
 để "đánh thức" nó. Máy tự dựng lại đầy đủ khi sandbox được cấp lại (setup script chạy lại), và trong
 lúc máy sống thì watchdog giữ sshd/tailscaled/app luôn chạy. Muốn máy chạy liên tục thật sự thì thread
 phải được hoạt động đều (mở Preview/gửi tin) hoặc máy phải chạy trên hạ tầng riêng (VPS/Modal ở mục dưới).
+
+## Cho agent của bạn dùng máy
+
+Máy này là **máy của agent**: cùng một shell (giữ `cd`/biến môi trường), đọc/ghi file, xem thông tin máy,
+và có sẵn trình duyệt Chromium. Ba cách cắm, tuỳ agent hỗ trợ gì:
+
+**1. MCP (Claude Code, Cursor, Codex…)** — config lấy sẵn trong app 🤖 Cho agent:
+
+```json
+{
+  "mcpServers": {
+    "hoplite-machine": {
+      "url": "http://hoplite-pc:3000/mcp",
+      "headers": { "X-API-Key": "<key trong .env>" }
+    }
+  }
+}
+```
+
+Tools: `machine_run`, `machine_read_file`, `machine_write_file`, `machine_list_dir`, `machine_info`,
+`browser_open/snapshot/screenshot/click/type/eval/close`.
+
+**2. REST** — cho agent chỉ có tool HTTP, mọi endpoint cần `X-API-Key`:
+
+| Endpoint | Body (JSON) | Trả về |
+|---|---|---|
+| `POST /machine/exec` | `{cmd, timeout?}` | `{stdout, code, cwd}` — shell giữ trạng thái |
+| `POST /machine/read` | `{path, max_bytes?}` | `{content, size, truncated, binary}` |
+| `POST /machine/write` | `{path, content, append?}` | `{path, bytes}` — tự tạo thư mục cha |
+| `POST /machine/list` | `{path?}` | `{entries:[{name,type,size}]}` |
+| `GET /machine/info` | — | thông tin máy + thư mục hiện tại |
+
+**3. SSH** — agent nào chạy shell thuần thì `ssh root@hoplite-pc` làm mọi thứ.
+
+Địa chỉ gọi: qua Tailscale là `http://hoplite-pc:3000` (ổn định, khuyên dùng); không có tailnet thì dùng
+URL preview (đổi theo phiên). Chạy thử: `.venv/bin/python tests/machine_smoke.py <base> <key>`.
+Cũng có thể **cài agent chạy ngay trong máy** (vd `npm i -g @anthropic-ai/claude-code`) rồi điều khiển qua
+SSH/tmux — khi đó chính agent sống trong cái máy này.
+
+Lưu ý: `/machine/*` trao quyền root toàn bộ sandbox — API key chính là chìa khoá, giữ như giữ mật khẩu.
 
 ## Deploy nơi khác (tùy chọn)
 
