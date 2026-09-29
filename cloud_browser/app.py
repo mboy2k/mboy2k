@@ -5,6 +5,7 @@ with `python app.py` on any machine that has Playwright installed.
 """
 
 import os
+import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -39,6 +40,7 @@ class Session:
 
 class BrowserPool:
     def __init__(self):
+        self._create_lock = asyncio.Lock()
         self._pw = None
         self._browser = None
         self.sessions: dict[str, Session] = {}
@@ -73,17 +75,22 @@ class BrowserPool:
         await self._ensure_browser()
         session = self.sessions.get(session_id) if session_id else None
         if session is None:
-            if session_id is None:
-                session_id = uuid.uuid4().hex[:12]
-            elif len(self.sessions) >= MAX_SESSIONS:
-                oldest = min(self.sessions, key=lambda s: self.sessions[s].last_used)
-                await self.close(oldest)
-            context = await self._browser.new_context(
-                user_agent=USER_AGENT, viewport={"width": 1280, "height": 800}, locale="en-US",
-            )
-            page = await context.new_page()
-            session = Session(context=context, page=page)
-            self.sessions[session_id] = session
+            # Serialize creation: concurrent opens would otherwise all pass the
+            # cap check before any of them registers, racing past MAX_SESSIONS.
+            async with self._create_lock:
+                session = self.sessions.get(session_id) if session_id else None
+                if session is None:
+                    if len(self.sessions) >= MAX_SESSIONS:
+                        oldest = min(self.sessions, key=lambda s: self.sessions[s].last_used)
+                        await self.close(oldest)
+                    if session_id is None:
+                        session_id = uuid.uuid4().hex[:12]
+                    context = await self._browser.new_context(
+                        user_agent=USER_AGENT, viewport={"width": 1280, "height": 800}, locale="en-US",
+                    )
+                    page = await context.new_page()
+                    session = Session(context=context, page=page)
+                    self.sessions[session_id] = session
         session.last_used = time.monotonic()
         try:
             response = await session.page.goto(url, wait_until=wait_until, timeout=timeout_ms)
