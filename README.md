@@ -136,6 +136,12 @@ python cloud_browser/app.py        # chạy tại :8099, đặt BROWSER_API_KEY 
 
 ## Ghi chú
 
+- Chi phí trên Modal (gói Starter có ~$30 credit/tháng): giữ container 24/7
+  (`MODAL_KEEP_WARM=1`, mặc định 2 CPU/2GB) ước khoảng $40-45/tháng theo giá công bố —
+  vượt credit free. Chạy `MODAL_KEEP_WARM=0 MODAL_CPU=1 MODAL_MEM_MIB=1024 modal deploy ...`
+  để scale-to-zero: gần như miễn phí, đổi lại sau ~2 phút nghỉ request đầu chờ ~15s.
+- VPS 1GB RAM không chạy nổi Chromium — kiến trúc đúng là browser chạy trên Modal,
+  agent trên VPS chỉ gọi HTTP.
 - Trên Hoplite, key nằm trong file `.env` (đã gitignore) ở thư mục workspace.
 - Trên Modal, chưa tạo secret `browser-api-key`? Service vẫn deploy được nhưng
   **không có auth** — hãy tạo secret sớm.
