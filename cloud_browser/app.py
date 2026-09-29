@@ -12,6 +12,7 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 MAX_SESSIONS = int(os.environ.get("MAX_SESSIONS", "8"))
@@ -162,15 +163,89 @@ class BrowserPool:
                 pass
 
 
+def build_mcp(pool: BrowserPool):
+    """MCP (Model Context Protocol) server so MCP-capable agents can use the browser natively."""
+    from mcp.server.fastmcp import FastMCP
+
+    mcp = FastMCP("cloud-browser")
+
+    @mcp.tool()
+    async def browser_open(url: str, session_id: str | None = None) -> dict:
+        """Open a URL in the cloud browser (new or existing session). Returns session_id."""
+        return await pool.open(url, session_id)
+
+    @mcp.tool()
+    async def browser_snapshot(session_id: str) -> dict:
+        """Get title, rendered text and links of the current page."""
+        return await pool.snapshot(session_id)
+
+    @mcp.tool()
+    async def browser_click(session_id: str, selector: str) -> dict:
+        """Click an element matching a CSS selector."""
+        await pool.click(session_id, selector)
+        return {"ok": True}
+
+    @mcp.tool()
+    async def browser_type(session_id: str, selector: str, text: str, submit: bool = False) -> dict:
+        """Fill a text field; submit=True presses Enter after typing."""
+        await pool.type(session_id, selector, text, submit)
+        return {"ok": True}
+
+    @mcp.tool()
+    async def browser_eval(session_id: str, script: str) -> dict:
+        """Run JavaScript in the page and return the result."""
+        return {"result": await pool.evaluate(session_id, script)}
+
+    @mcp.tool()
+    async def browser_screenshot(session_id: str, full_page: bool = False):
+        """Take a PNG screenshot of the current page."""
+        from mcp.server.fastmcp import Image
+
+        png = await pool.screenshot(session_id, full_page)
+        return Image(data=png, format="png")
+
+    @mcp.tool()
+    async def browser_close(session_id: str) -> dict:
+        """Close a browser session."""
+        await pool.close(session_id)
+        return {"ok": True}
+
+    return mcp.streamable_http_app(), mcp.session_manager
+
+
 def create_app() -> FastAPI:
     import secrets as pysecrets
+    from contextlib import AsyncExitStack, asynccontextmanager
 
     api_key = os.environ.get("BROWSER_API_KEY", "")
     pool = BrowserPool()
 
-    app = FastAPI(title="Cloud Browser", version="1.0.0",
-                  description="Headless Chromium controlled over HTTP, built for AI agents.")
+    mcp_app = None
+    mcp_session_manager = None
+    try:
+        mcp_app, mcp_session_manager = build_mcp(pool)
+    except Exception:
+        mcp_app = None  # REST keeps working if the MCP SDK is absent
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        async with AsyncExitStack() as stack:
+            if mcp_session_manager is not None:
+                await stack.enter_async_context(mcp_session_manager.run())
+            yield
+
+    app = FastAPI(title="Cloud Browser", version="1.1.0",
+                  description="Headless Chromium controlled over HTTP, built for AI agents.",
+                  lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+    @app.middleware("http")
+    async def mcp_auth(request, call_next):
+        if mcp_app is not None and api_key and request.url.path.startswith("/mcp"):
+            key = request.headers.get("X-API-Key")
+            if not key or not pysecrets.compare_digest(key, api_key):
+                return JSONResponse({"detail": "invalid or missing X-API-Key header"}, status_code=401)
+        return await call_next(request)
 
     def auth(x_api_key: Optional[str] = Header(default=None, alias="X-API-Key")):
         if not api_key:
@@ -213,6 +288,7 @@ def create_app() -> FastAPI:
             "service": "cloud-browser",
             "docs": "/docs",
             "actions": ["open", "snapshot", "screenshot", "click", "type", "press", "eval", "wait", "close"],
+            "mcp": "/mcp" if mcp_app is not None else None,
         }
 
     @app.get("/health")
@@ -265,6 +341,11 @@ def create_app() -> FastAPI:
     async def close(req: SessionReq):
         await pool.close(req.session_id)
         return {"ok": True}
+
+    if mcp_app is not None:
+        # Mounted last so REST routes match first. FastMCP serves at /mcp inside
+        # its own app; mounting at root avoids /mcp/mcp and the 307 redirect.
+        app.mount("/", mcp_app)
 
     return app
 

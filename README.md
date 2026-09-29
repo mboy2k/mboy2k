@@ -82,6 +82,30 @@ b.screenshot("page.png", full_page=True)
 b.close()
 ```
 
+## Cho agent khác dùng kiểu gì?
+
+**1. REST/OpenAPI** — mọi agent có tool HTTP (curl, fetch, code interpreter) dùng được ngay.
+Spec OpenAPI machine-readable tại `/openapi.json`, UI thử tại `/docs`.
+
+**2. MCP (Model Context Protocol)** — agent hỗ trợ MCP (Claude Desktop, Claude Code,
+Cursor, v.v.) cắm trực tiếp vào `/mcp` với các tool: `browser_open`, `browser_snapshot`,
+`browser_screenshot`, `browser_click`, `browser_type`, `browser_eval`, `browser_close`:
+
+```json
+{
+  "mcpServers": {
+    "cloud-browser": {
+      "url": "<URL preview>/mcp",
+      "headers": { "X-API-Key": "<key>" }
+    }
+  }
+}
+```
+
+**3. Python client** — `cloud_browser/client_example.py`, import vào codebase của agent.
+
+Cả ba điệu điều khiển cùng một pool phiên: session tạo bằng REST dùng được bằng MCP và ngược lại.
+
 ## Chạy thử cục bộ
 
 ```bash
