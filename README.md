@@ -14,14 +14,33 @@ Agent ──HTTP──> Hoplite Preview (HTTPS, token bảo mật của platform
 
 ## Chạy trên Hoplite (mặc định)
 
-Preview được quản lý bằng script đã cấu hình trong dự án:
+Preview được quản lý bằng hai script nằm trong repo (project settings trỏ vào chúng):
 
-- **Setup script** (idempotent): tạo `.venv`, cài `requirements.txt`, tải Chromium.
-- **Run script**: nạp `.env` (chứa `BROWSER_API_KEY`), chạy
-  `.venv/bin/python cloud_browser/app.py` tại cổng 3000.
+- **`scripts/hoplite_setup.sh`** (idempotent): tạo `.venv`, cài `requirements.txt`, tải Chromium,
+  và sinh `.env` với `BROWSER_API_KEY` mới nếu file chưa có.
+- **`scripts/hoplite_run.sh`**: nạp `.env`, ghi port manifest, chạy
+  `.venv/bin/python cloud_browser/app.py` tại cổng 3000 và tự khởi động lại nếu app thoát.
 
 Preview nằm trong Preview panel của thread (reference `agent-preview:3000/`).
 Sửa code xong chỉ cần start lại preview để nạp bản mới.
+
+## Máy tính Hoplite (Hoplite PC)
+
+Mở Preview là vào thẳng **Hoplite PC** — một "máy tính" chạy trong workspace, dùng được trên điện thoại:
+
+| App | Việc nó làm |
+|---|---|
+| 🧮 **Máy tính** | Máy tính bỏ túi: cộng/trừ/nhân/chia, `%`, `±`, hỗ trợ cả bàn phím máy tính |
+| ⌨️ **Terminal** | Gõ lệnh thẳng vào sandbox; shell giữ nguyên `cd` và biến môi trường giữa các lệnh |
+| 🌐 **Trình duyệt** | Lướt web bằng Chromium của sandbox: nhập địa chỉ hoặc từ khoá, chạm để click, cuộn, gõ chữ |
+
+Trang chủ hiển thị tên máy, kernel, RAM, thời gian chạy và **IP công khai kèm thành phố/quốc gia của máy**.
+Đồng hồ ở thanh dưới hiển thị giờ Việt Nam.
+
+UI gọi backend ở `/pc/*`; app Trình duyệt dùng chung pool session với REST/MCP, nên session mở từ UI
+vẫn điều khiển được bằng API và ngược lại. `/` và `/pc/*` không đòi `X-API-Key` vì đã nằm sau Preview
+của Hoplite — **chỉ mở từ Preview panel**, đừng dán link preview cho người khác vì Terminal chạy được
+lệnh trong máy.
 
 ## Deploy nơi khác (tùy chọn)
 
@@ -75,7 +94,8 @@ Xem log: `journalctl -u cloud-browser -f`.
 | `POST /close` | `{session_id}` | `{ok}` |
 | `GET /health` | — | trạng thái service |
 
-Mọi endpoint (trừ `/health`) yêu cầu header `X-API-Key`. Tài liệu tương tác tại `/docs`.
+Mọi endpoint (trừ `/`, `/info`, `/health` và nhóm `/pc/*` của Hoplite PC) yêu cầu header `X-API-Key`.
+Thông tin service dạng JSON nằm ở `/info`; tài liệu tương tác tại `/docs`.
 Session sống 15 phút giữa các lần dùng (tự dọn), tối đa 8 session song song.
 
 ## Ví dụ cho agent
@@ -131,7 +151,7 @@ Cả ba điệu điều khiển cùng một pool phiên: session tạo bằng RE
 
 ```bash
 pip install -r requirements.txt && playwright install --with-deps chromium
-python cloud_browser/app.py        # chạy tại :8099, đặt BROWSER_API_KEY để bật auth
+python cloud_browser/app.py        # cổng theo PORT trong .env (mặc định 8099)
 ```
 
 ## Ghi chú
