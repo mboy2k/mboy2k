@@ -376,10 +376,12 @@ if modal is not None:
     @app.function(
         image=playwright_image,
         secrets=_modal_secrets(),
-        keep_warm=1,  # keeps one container alive 24/7 so the agent never hits a cold start
+        # keep_warm=0 scales to zero (cheap, ~15s cold start after ~2 min idle);
+        # keep_warm=1 keeps one container alive 24/7 so agents never wait.
+        keep_warm=int(os.environ.get("MODAL_KEEP_WARM", "1")),
         max_containers=1,  # single container keeps in-memory browser sessions
-        cpu=2,
-        memory=2048,
+        cpu=int(os.environ.get("MODAL_CPU", "2")),
+        memory=int(os.environ.get("MODAL_MEM_MIB", "2048")),
         timeout=600,
     )
     @modal.asgi_app()
