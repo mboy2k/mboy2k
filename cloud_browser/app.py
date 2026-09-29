@@ -207,7 +207,7 @@ def create_app() -> FastAPI:
     class WaitReq(ClickReq):
         pass
 
-    @app.get("/", dependencies=[Depends(auth)])
+    @app.get("/")
     async def root():
         return {
             "service": "cloud-browser",

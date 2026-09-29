@@ -1,32 +1,43 @@
 # Cloud Browser 24/7 — trình duyệt headless cho AI agent
 
-Trình duyệt Chromium chạy trên nền tảng [Modal](https://modal.com), luôn online 24/7,
-điều khiển qua API HTTP. Agent trợ lý của bạn chỉ cần gọi REST là mở trang, đọc nội dung,
-click, gõ, chụp màn hình — không cần cài browser ở đâu cả.
+Trình duyệt Chromium chạy liên tục 24/7 trong workspace Hoplite, điều khiển qua API HTTP.
+Agent trợ lý của bạn chỉ cần gọi REST là mở trang, đọc nội dung, click, gõ, chụp màn hình
+— không cần cài browser ở đâu cả.
 
 ## Kiến trúc
 
 ```
-Agent ──HTTP──> https://cloud-browser-<workspace>.modal.run
+Agent ──HTTP──> Hoplite Preview (HTTPS, token bảo mật của platform)
                      │  FastAPI (auth X-API-Key)
-                     └─ Chromium (Playwright) trong container Modal
-                        keep_warm=1 → container luôn sống, không cold start
+                     └─ Chromium (Playwright) trong sandbox Hoplite
 ```
 
-## Triển khai (2 bước)
+## Chạy trên Hoplite (mặc định)
+
+Preview được quản lý bằng script đã cấu hình trong dự án:
+
+- **Setup script** (idempotent): tạo `.venv`, cài `requirements.txt`, tải Chromium.
+- **Run script**: nạp `.env` (chứa `BROWSER_API_KEY`), chạy
+  `.venv/bin/python cloud_browser/app.py` tại cổng 3000.
+
+Preview nằm trong Preview panel của thread (reference `agent-preview:3000/`).
+Sửa code xong chỉ cần start lại preview để nạp bản mới.
+
+## Deploy nơi khác (tùy chọn)
+
+**Modal** — giữ `keep_warm=1` để container luôn sống, không cold start:
 
 ```bash
 pip install modal
 modal token new                                  # đăng nhập Modal
 
-# 1. Tạo API key (bảo mật; dùng khóa bất kỳ bạn muốn)
 modal secret create browser-api-key BROWSER_API_KEY=dat-khoa-o-day
 
-# 2. Deploy — URL trả về chính là trình duyệt đám mây của bạn
 modal deploy cloud_browser/app.py
 ```
 
-Sau này cập nhật code chỉ cần chạy lại `modal deploy`. Tắt hẳn: `modal app stop cloud-browser`.
+**VPS thường** — `pip install -r requirements.txt && playwright install --with-deps chromium`,
+rồi chạy `python cloud_browser/app.py` dưới systemd/tmux (cổng mặc định 8099, đổi qua `PORT`).
 
 ## API
 
@@ -49,7 +60,7 @@ Session sống 15 phút giữa các lần dùng (tự dọn), tối đa 8 sessio
 ## Ví dụ cho agent
 
 ```bash
-BASE=https://cloud-browser-xxx.modal.run
+BASE=<URL preview hoặc http://localhost:3000>
 KEY=dat-khoa-o-day
 
 SID=$(curl -s $BASE/open -H "X-API-Key: $KEY" -H 'Content-Type: application/json' \
@@ -64,14 +75,14 @@ Hoặc dùng client Python có sẵn:
 ```python
 from cloud_browser.client_example import CloudBrowser
 
-b = CloudBrowser("https://cloud-browser-xxx.modal.run", "dat-khoa-o-day")
+b = CloudBrowser("http://localhost:3000", "dat-khoa-o-day")
 b.open("https://example.com")
 print(b.snapshot()["text"])
 b.screenshot("page.png", full_page=True)
 b.close()
 ```
 
-## Chạy thử cục bộ (không cần Modal)
+## Chạy thử cục bộ
 
 ```bash
 pip install -r requirements.txt && playwright install --with-deps chromium
@@ -80,9 +91,7 @@ python cloud_browser/app.py        # chạy tại :8099, đặt BROWSER_API_KEY 
 
 ## Ghi chú
 
-- Chi phí: keep_warm giữ 1 container (2 CPU / 2GB) chạy liên tục — xem dashboard Modal
-  để theo dõi. Muốn tiết kiệm, bỏ `keep_warm=1` trong `app.py`: service vẫn online 24/7
-  nhưng request đầu sau ~2 phút nghỉ sẽ chờ cold start.
-- Chưa tạo secret `browser-api-key`? Service vẫn deploy được nhưng **không có auth** —
-  hãy tạo secret sớm.
+- Trên Hoplite, key nằm trong file `.env` (đã gitignore) ở thư mục workspace.
+- Trên Modal, chưa tạo secret `browser-api-key`? Service vẫn deploy được nhưng
+  **không có auth** — hãy tạo secret sớm.
 - Selector là CSS selector của Playwright, hỗ trợ thêm `text=...` nếu cần.
