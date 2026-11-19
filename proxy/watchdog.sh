@@ -21,7 +21,7 @@ log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; }
 ensure_gost() {
   if ! pgrep -f "bin/gost -L" >/dev/null 2>&1; then
     log "gost chết -> dựng lại"
-    setsid nohup "$ROOT/bin/gost" -L "auto://$U:$P@$LOCAL" >>"$STATE/gost.log" 2>&1 </dev/null &
+    setsid nohup "$ROOT/bin/gost" -L "auto://$U:$P@$LOCAL" >>"$STATE/gost.log" 2>&1 </dev/null 9>&- &
     sleep 1
   fi
 }
@@ -29,7 +29,7 @@ ensure_gost() {
 ensure_bore() {
   if ! pgrep -f "bin/bore local" >/dev/null 2>&1; then
     log "bore chết -> dựng lại"
-    setsid nohup "$ROOT/bin/bore" local 8080 --to "$RELAY" --port "$PORT" >>"$STATE/bore.log" 2>&1 </dev/null &
+    setsid nohup "$ROOT/bin/bore" local 8080 --to "$RELAY" --port "$PORT" >>"$STATE/bore.log" 2>&1 </dev/null 9>&- &
     sleep 3
   fi
   got=$(grep -o "listening at $RELAY:[0-9]*" "$STATE/bore.log" | tail -1 | cut -d: -f2)
