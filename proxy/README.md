@@ -35,7 +35,8 @@ curl -x "http://boss:PASS@bore.pub:37635" https://api.ipify.org
 | Đổi mật khẩu | sửa `auth.txt` → `bash proxy/stop.sh` → `bash proxy/start.sh` |
 
 Watchdog chạy 30 giây/lần, tự dựng lại `gost`/`bore` nếu chúng chết.
-Sandbox bị dựng lại máy: file vẫn còn trong workspace, chạy lại `bash proxy/start.sh`.
+Máy dựng lại cũng không cần làm gì: `scripts/hoplite_setup.sh` (chạy tự động khi
+workspace được dựng) sinh mật khẩu lần đầu, tải binary và bật sẵn watchdog.
 
 ## Giới hạn (đọc một lần)
 
