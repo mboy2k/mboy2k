@@ -36,12 +36,35 @@ ensure_bore() {
   if [ -n "$got" ]; then
     printf '%s:%s:%s:%s\n' "$RELAY" "$got" "$U" "$P" > "$STATE/endpoint.txt"
     chmod 600 "$STATE/endpoint.txt"
+    if [ "$got" != "$PORT" ]; then
+      log "canh bao: port doi thanh $got (xem state/endpoint.txt)"
+    fi
   fi
 }
 
 log "watchdog start pid=$$"
+fails=0
+tick=0
 while :; do
   ensure_gost
   ensure_bore
-  sleep 30
+  tick=$((tick + 1))
+  # Mỗi phút test thật đường tunnel; tắc 2 lần liên tiếp thì dựng lại bore.
+  if [ $((tick % 6)) -eq 0 ]; then
+    ep_port=$PORT
+    [ -s "$STATE/endpoint.txt" ] && ep_port=$(cut -d: -f2 "$STATE/endpoint.txt")
+    if curl -s -m 8 -x "http://$U:$P@$RELAY:$ep_port" -o /dev/null https://api.ipify.org; then
+      fails=0
+    else
+      fails=$((fails + 1))
+      log "health check fail lan $fails"
+      if [ "$fails" -ge 2 ]; then
+        log "tunnel khong thong -> dung lai bore"
+        pkill -x bore 2>/dev/null
+        fails=0
+        sleep 2
+      fi
+    fi
+  fi
+  sleep 10
 done
