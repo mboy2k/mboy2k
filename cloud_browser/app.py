@@ -390,8 +390,17 @@ if modal is not None:
 
 
 if __name__ == "__main__":
+    import sys
+
     import uvicorn
 
+    try:
+        from cloud_browser.proxy import start_in_thread
+    except ImportError:  # `python cloud_browser/app.py` puts this directory on sys.path
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from cloud_browser.proxy import start_in_thread
+
+    start_in_thread()
     uvicorn.run(create_app(), host=os.environ.get("HOST", "0.0.0.0"),
                 port=int(os.environ.get("PORT", "8099")))
 
