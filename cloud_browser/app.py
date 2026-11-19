@@ -10,10 +10,20 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
+
+try:
+    from cloud_browser.webproxy import render_error, render_home, render_view
+except ImportError:  # `python cloud_browser/app.py` puts this directory on sys.path
+    from webproxy import render_error, render_home, render_view
+
+try:
+    from cloud_browser.tunnel import handle_tunnel
+except ImportError:  # `python cloud_browser/app.py` puts this directory on sys.path
+    from tunnel import handle_tunnel
 
 MAX_SESSIONS = int(os.environ.get("MAX_SESSIONS", "8"))
 SESSION_IDLE_TIMEOUT = int(os.environ.get("SESSION_IDLE_TIMEOUT", "900"))
@@ -283,13 +293,34 @@ def create_app() -> FastAPI:
         pass
 
     @app.get("/")
-    async def root():
+    async def root(request: Request):
+        if "text/html" in request.headers.get("accept", ""):
+            return HTMLResponse(render_home())
         return {
             "service": "cloud-browser",
             "docs": "/docs",
             "actions": ["open", "snapshot", "screenshot", "click", "type", "press", "eval", "wait", "close"],
             "mcp": "/mcp" if mcp_app is not None else None,
         }
+
+    @app.get("/view")
+    async def view(url: str, sid: Optional[str] = None):
+        """Render a page through the sandbox for humans using the Preview link."""
+        if not url.startswith(("http://", "https://")):
+            return HTMLResponse(render_error(url, "Chỉ hỗ trợ http:// và https://"),
+                                status_code=400)
+        try:
+            session_id = (await pool.open(url, session_id=sid or None))["session_id"]
+            snapshot = await pool.snapshot(session_id)
+            png = await pool.screenshot(session_id)
+        except HTTPException as exc:
+            return HTMLResponse(render_error(url, str(exc.detail)), status_code=exc.status_code)
+        return HTMLResponse(render_view(url, snapshot, png, session_id))
+
+    @app.websocket("/tunnel")
+    async def tunnel(websocket: WebSocket):
+        """Raw TCP through the sandbox for tools/hoplite_proxy_client.py."""
+        await handle_tunnel(websocket, api_key)
 
     @app.get("/health")
     async def health():
@@ -392,6 +423,12 @@ if modal is not None:
 if __name__ == "__main__":
     import uvicorn
 
+    try:
+        from cloud_browser.proxy import start_in_thread
+    except ImportError:  # `python cloud_browser/app.py` puts this directory on sys.path
+        from proxy import start_in_thread
+
+    start_in_thread()
     uvicorn.run(create_app(), host=os.environ.get("HOST", "0.0.0.0"),
                 port=int(os.environ.get("PORT", "8099")))
 

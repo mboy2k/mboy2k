@@ -74,9 +74,79 @@ Xem log: `journalctl -u cloud-browser -f`.
 | `POST /wait` | `{session_id, selector}` | `{ok}` |
 | `POST /close` | `{session_id}` | `{ok}` |
 | `GET /health` | — | trạng thái service |
+| `GET /view` | query `url`, `sid?` | HTML: ảnh chụp + chữ + link của trang (dành cho người) |
 
 Mọi endpoint (trừ `/health`) yêu cầu header `X-API-Key`. Tài liệu tương tác tại `/docs`.
 Session sống 15 phút giữa các lần dùng (tự dọn), tối đa 8 session song song.
+
+## Dùng web qua sandbox cho người (không cần cài gì)
+
+Mở link Preview của thread (`agent-preview:3000/`) bằng browser: trang chủ trả về một form
+nhỏ — nhập URL, bấm **Mở qua sandbox**, trang sẽ được tải bằng Chromium trong sandbox rồi
+hiển thị lại kèm ảnh chụp, nội dung chữ và danh sách link bấm được (mỗi link mở tiếp trong
+cùng session, nên đăng nhập/điều hướng giữ nguyên).
+
+- `GET /` — HTML cho browser, JSON cho client API (theo header `Accept`).
+- `GET /view?url=<target>&sid=<session>` — render một trang; bỏ `sid` để tạo session mới.
+
+Hai route này không hỏi `X-API-Key` vì chỉ dành cho người mở link Preview (link đã mang
+token riêng của platform, hết hạn theo phiên); toàn bộ API JSON và MCP vẫn yêu cầu key như cũ.
+
+## Forward proxy (agent/tiến trình trong sandbox)
+
+`python cloud_browser/app.py` mở kèm một forward proxy HTTP/HTTPS (có `CONNECT`) tại
+`PROXY_HOST:PROXY_PORT`, mặc định `0.0.0.0:8888`:
+
+```bash
+PROXY="http://hoplite:$PROXY_PASSWORD@127.0.0.1:8888"
+curl -x "$PROXY" https://example.com          # HTTPS qua CONNECT
+curl -x "$PROXY" -I http://example.com        # HTTP thường
+export HTTP_PROXY="$PROXY" HTTPS_PROXY="$PROXY"   # CLI/tool đọc biến chuẩn
+```
+
+| Biến | Mặc định | Ý nghĩa |
+|---|---|---|
+| `PROXY_HOST` | `0.0.0.0` | Địa chỉ lắng nghe (`127.0.0.1` nếu chỉ dùng trong sandbox). |
+| `PROXY_PORT` | `8888` | Cổng proxy. |
+| `PROXY_USER` | `hoplite` | User Basic auth. |
+| `PROXY_PASSWORD` | rơi về `BROWSER_API_KEY` | Mật khẩu Basic auth. |
+| `PROXY_ALLOW_PRIVATE` | `0` | `1` = cho phép đích private/loopback. |
+| `PROXY_DISABLED` | `0` | `1` = không mở proxy khi chỉ cần browser API. |
+
+Auth bắt buộc khi nghe ngoài loopback (không có mật khẩu thì proxy từ chối khởi động),
+header `X-API-Key` cũng được chấp nhận. Đích private/loopback bị chặn mặc định, địa chỉ
+metadata cloud (`169.254.169.254`, `fd00:ec2::254`) luôn bị chặn.
+
+Lưu ý: link Preview của Hoplite chỉ nhận HTTP kèm token của platform (edge trả 401 cho
+`CONNECT`), nên **từ máy ngoài hãy dùng trang `/view`** ở trên; còn proxy thì dùng cho
+tiến trình trong sandbox hoặc khi có cổng TCP mở trực tiếp.
+
+## Cắm vào BP Proxy Switcher / tool proxy trên máy bạn
+
+Cổng Preview của Hoplite là HTTP relay có token: nó **chặn `CONNECT`** (`400 Invalid request URI`)
+và ghi lại request absolute-form thành origin-form, nên không thể trỏ thẳng BP Proxy Switcher
+vào link Preview. Repo có sẵn cầu nối: `tools/hoplite_proxy_client.py` chạy trên máy bạn, nói
+giao thức proxy HTTP/HTTPS với app cục bộ rồi chở từng kết nối qua WebSocket tới `/tunnel`
+của app trong sandbox.
+
+```bash
+pip install websockets
+python tools/hoplite_proxy_client.py \
+  --url "https://<preview-host>/?_modal_connect_token=<token>" \
+  --api-key <BROWSER_API_KEY> --password <PROXY_PASSWORD>
+# => Proxy nghe tại 127.0.0.1:8899
+```
+
+Entry để cắm vào BP Proxy Switcher (client cũng in ra dòng này khi chạy):
+
+```
+127.0.0.1:8899:hoplite:<PROXY_PASSWORD>
+```
+
+- Link Preview hết hạn sau khoảng 1 giờ: lấy link mới trong Preview panel rồi chạy lại client.
+- `/tunnel` cần `X-API-Key` (`--api-key`); đích private/loopback và metadata cloud vẫn bị chặn
+  (bật `PROXY_ALLOW_PRIVATE=1` nếu thật sự cần, trừ metadata thì luôn chặn).
+- Mọi traffic đi ra bằng IP của sandbox; sandbox tắt là proxy hết.
 
 ## Ví dụ cho agent
 
